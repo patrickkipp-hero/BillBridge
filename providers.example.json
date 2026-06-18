@@ -1,0 +1,11 @@
+[
+  {
+    "id": "galaxus",
+    "name": "Galaxus",
+    "website": "https://www.galaxus.de/en/order",
+    "email": "deine@email.de",
+    "password": "dein-passwort",
+    "color": "#FF9800",
+    "custom": true
+  }
+]

@@ -1,0 +1,33 @@
+# Credentials & Secrets
+.env
+providers.json
+
+# Browser-Sessions (enthalten Login-Cookies)
+sessions/
+browser_profiles/
+
+# Heruntergeladene Rechnungen
+invoices/
+
+# Laufzeit-Daten
+seen_invoices.txt
+settings.json
+billbridge.log
+*.log
+
+# Debug-Dateien
+debug_*.html
+*.png
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Claude Code
+.claude/

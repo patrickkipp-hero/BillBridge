@@ -1,0 +1,1520 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BillBridge</title>
+<style>
+  /* ── Reset & Base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --accent: #FFD700;
+    --accent-dark: #e6c200;
+    --sidebar-bg: #111111;
+    --sidebar-text: #a0a0a0;
+    --sidebar-active: #ffffff;
+    --content-bg: #f5f5f5;
+    --card-bg: #ffffff;
+    --text: #111111;
+    --text-muted: #666666;
+    --border: #e5e5e5;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --radius: 10px;
+    --font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+  }
+  html, body { height: 100%; font-family: var(--font); background: var(--content-bg); color: var(--text); font-size: 14px; }
+
+  /* ── Layout ── */
+  .app { display: flex; height: 100vh; overflow: hidden; }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 220px; min-width: 220px; background: var(--sidebar-bg);
+    display: flex; flex-direction: column; padding: 16px 0;
+    user-select: none;
+  }
+  .sidebar-logo {
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 16px 4px; margin-bottom: 4px;
+  }
+  .logo-icon {
+    width: 36px; height: 36px; background: var(--accent); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    font-size: 18px; font-weight: 900; color: #111; letter-spacing: -1px;
+  }
+  .logo-text { color: #fff; font-size: 16px; font-weight: 700; line-height: 1.1; }
+  .logo-sub { color: var(--sidebar-text); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+
+  .sidebar-search {
+    margin: 10px 12px 16px;
+    background: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 7px;
+    display: flex; align-items: center; padding: 7px 10px; gap: 7px;
+  }
+  .sidebar-search input {
+    background: none; border: none; outline: none; color: #fff; font-size: 13px; width: 100%;
+  }
+  .sidebar-search input::placeholder { color: #555; }
+  .search-icon { color: #555; font-size: 12px; }
+  .search-shortcut {
+    background: #2a2a2a; border-radius: 4px; padding: 1px 5px;
+    font-size: 10px; color: #555; flex-shrink: 0;
+  }
+
+  .sidebar-section { padding: 4px 12px; margin-bottom: 2px; }
+  .sidebar-section-label { font-size: 10px; color: #444; letter-spacing: 0.1em; text-transform: uppercase; padding: 8px 4px 4px; }
+
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 8px; border-radius: 7px; cursor: pointer;
+    color: var(--sidebar-text); font-size: 13.5px; font-weight: 500;
+    transition: background 0.15s, color 0.15s; position: relative;
+  }
+  .nav-item:hover { background: #1e1e1e; color: #ddd; }
+  .nav-item.active { background: #1e1e1e; color: var(--sidebar-active); }
+  .nav-item .nav-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
+  .nav-badge {
+    margin-left: auto; background: var(--accent); color: #111;
+    font-size: 10px; font-weight: 700; border-radius: 20px;
+    padding: 1px 6px; min-width: 18px; text-align: center;
+  }
+
+  .sidebar-bottom { margin-top: auto; padding: 0 12px; border-top: 1px solid #1e1e1e; padding-top: 12px; }
+  .user-chip {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px; border-radius: 7px; cursor: pointer;
+    color: var(--sidebar-text); font-size: 12.5px;
+  }
+  .user-chip:hover { background: #1e1e1e; }
+  .user-avatar {
+    width: 28px; height: 28px; background: var(--accent); border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 11px; color: #111; flex-shrink: 0;
+  }
+  .user-name { font-weight: 600; color: #ccc; font-size: 13px; }
+  .user-email { font-size: 11px; color: #555; }
+
+  /* ── Main Content ── */
+  .main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 28px; background: var(--card-bg);
+    border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10;
+  }
+  .topbar-title { font-size: 15px; font-weight: 600; color: var(--text-muted); }
+  .topbar-title span { color: var(--text); }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    border: none; cursor: pointer; transition: all 0.15s;
+  }
+  .btn-primary { background: var(--accent); color: #111; }
+  .btn-primary:hover { background: var(--accent-dark); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary { background: var(--border); color: var(--text); }
+  .btn-secondary:hover { background: #d5d5d5; }
+  .btn-ghost { background: none; color: var(--text-muted); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--border); }
+  .btn-danger { background: none; color: var(--red); border: none; padding: 0; font-size: 13px; }
+
+  .content { padding: 28px; flex: 1; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--card-bg); border-radius: var(--radius);
+    border: 1px solid var(--border); padding: 20px;
+  }
+  .card-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .card-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+
+  /* ── Dashboard ── */
+  .greeting { font-size: 26px; font-weight: 800; margin-bottom: 4px; }
+  .greeting-sub { font-size: 14px; color: var(--text-muted); margin-bottom: 24px; }
+  .greeting-sub a { color: var(--accent-dark); text-decoration: none; font-weight: 600; }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--card-bg); border-radius: var(--radius);
+    border: 1px solid var(--border); padding: 18px 20px;
+  }
+  .stat-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat-value { font-size: 28px; font-weight: 800; line-height: 1; }
+  .stat-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+  .stat-yellow { color: var(--accent-dark); }
+
+  .two-col { display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
+
+  .run-item {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  .run-item:last-child { border-bottom: none; }
+  .run-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+  .run-dot.green { background: var(--green); }
+  .run-dot.yellow { background: var(--yellow); }
+  .run-dot.red { background: var(--red); }
+  .run-label { font-size: 13px; font-weight: 600; }
+  .run-sub { font-size: 12px; color: var(--text-muted); }
+  .run-meta { margin-left: auto; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
+  .provider-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .provider-item:last-child { border-bottom: none; }
+  .provider-logo {
+    width: 32px; height: 32px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 11px; flex-shrink: 0;
+  }
+  .provider-name { font-size: 13px; font-weight: 600; }
+  .provider-status { font-size: 11px; }
+  .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; }
+  .status-dot.green { background: var(--green); }
+  .status-dot.yellow { background: var(--yellow); }
+  .status-dot.red { background: var(--red); }
+  .provider-count { margin-left: auto; font-size: 13px; font-weight: 700; }
+
+  .next-run-card {
+    background: #111; color: #fff; border-radius: var(--radius);
+    padding: 16px 18px; margin-top: 16px;
+  }
+  .next-run-time { font-size: 22px; font-weight: 800; }
+  .next-run-label { font-size: 12px; color: #888; margin-bottom: 8px; }
+  .next-run-sub { font-size: 12px; color: #666; margin-top: 6px; }
+
+  /* ── Invoices ── */
+  .invoice-layout { display: grid; grid-template-columns: 320px 1fr; gap: 20px; height: calc(100vh - 140px); }
+  .invoice-list { overflow-y: auto; }
+  .invoice-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border-radius: 8px; cursor: pointer;
+    border: 1px solid transparent; transition: all 0.15s; margin-bottom: 4px;
+    background: var(--card-bg); border-color: var(--border);
+  }
+  .invoice-item:hover { border-color: #ccc; }
+  .invoice-item.active { border-color: var(--accent); background: #fffbeb; }
+  .invoice-icon { font-size: 24px; flex-shrink: 0; }
+  .invoice-name { font-size: 13px; font-weight: 600; word-break: break-all; line-height: 1.3; }
+  .invoice-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .invoice-preview {
+    background: var(--card-bg); border-radius: var(--radius);
+    border: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column;
+  }
+  .invoice-preview-bar {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .invoice-preview-name { font-size: 13px; font-weight: 600; }
+  .invoice-preview-frame { flex: 1; border: none; width: 100%; }
+
+  /* ── Providers ── */
+  .provider-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .provider-badge {
+    width: 44px; height: 44px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 14px; flex-shrink: 0;
+  }
+  .provider-info { flex: 1; }
+  .provider-info h3 { font-size: 15px; font-weight: 700; }
+  .provider-info p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  }
+  .status-pill.active { background: #dcfce7; color: #166534; }
+  .status-pill.warning { background: #fef9c3; color: #854d0e; }
+  .status-pill.error { background: #fee2e2; color: #991b1b; }
+
+  /* ── Slack ── */
+  .form-group { margin-bottom: 20px; }
+  .form-label { font-size: 13px; font-weight: 600; margin-bottom: 6px; display: block; }
+  .form-hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+  .form-input {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--border);
+    border-radius: 8px; font-size: 13px; font-family: var(--font);
+    outline: none; transition: border 0.15s; background: #fff;
+  }
+  .form-input:focus { border-color: var(--accent); }
+  .form-input.mono { font-family: 'SF Mono', monospace; font-size: 12px; }
+  .connected-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #dcfce7; color: #166534; padding: 4px 10px;
+    border-radius: 20px; font-size: 12px; font-weight: 600;
+  }
+
+  /* ── Automation ── */
+  .toggle-group { display: flex; gap: 8px; flex-wrap: wrap; }
+  .toggle-btn {
+    padding: 7px 16px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--card-bg); cursor: pointer; font-size: 13px; font-weight: 600;
+    transition: all 0.15s;
+  }
+  .toggle-btn.active { background: var(--accent); border-color: var(--accent); color: #111; }
+  .toggle-btn:hover:not(.active) { background: var(--border); }
+
+  .time-input {
+    padding: 9px 14px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 16px; font-weight: 700; font-family: var(--font);
+    outline: none; width: 110px; background: var(--card-bg);
+  }
+  .time-input:focus { border-color: var(--accent); }
+
+  .rule-item {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    padding: 14px 0; border-bottom: 1px solid var(--border); gap: 20px;
+  }
+  .rule-item:last-child { border-bottom: none; }
+  .rule-label { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+  .rule-desc { font-size: 12px; color: var(--text-muted); }
+
+  /* Toggle switch */
+  .switch { position: relative; display: inline-block; width: 44px; height: 26px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; cursor: pointer; inset: 0;
+    background: #ddd; border-radius: 26px; transition: 0.2s;
+  }
+  .slider:before {
+    content: ""; position: absolute; height: 20px; width: 20px;
+    left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.2s;
+  }
+  input:checked + .slider { background: var(--accent); }
+  input:checked + .slider:before { transform: translateX(18px); }
+
+  /* ── Settings ── */
+  .settings-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 0; border-bottom: 1px solid var(--border); gap: 20px;
+  }
+  .settings-row:last-child { border-bottom: none; }
+  .settings-label { font-size: 14px; font-weight: 600; }
+  .settings-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+  .color-swatches { display: flex; gap: 8px; align-items: center; }
+  .color-swatch {
+    width: 28px; height: 28px; border-radius: 7px; cursor: pointer;
+    border: 2px solid transparent; transition: transform 0.15s;
+  }
+  .color-swatch:hover { transform: scale(1.1); }
+  .color-swatch.selected { border-color: #333; }
+
+  .keychain-row {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--content-bg); border-radius: 10px; padding: 14px 16px;
+    margin-top: 4px;
+  }
+  .keychain-icon { font-size: 24px; }
+  .keychain-info { flex: 1; }
+  .keychain-info h4 { font-size: 14px; font-weight: 600; }
+  .keychain-info p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ── Log ── */
+  .log-box {
+    background: #111; color: #ccc; border-radius: var(--radius);
+    padding: 16px; font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px; line-height: 1.6; height: 400px; overflow-y: auto;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .log-box .log-ok { color: #22c55e; }
+  .log-box .log-err { color: #ef4444; }
+  .log-box .log-info { color: #60a5fa; }
+
+  /* ── Running indicator ── */
+  .running-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #dcfce7; color: #166534; padding: 5px 12px;
+    border-radius: 20px; font-size: 13px; font-weight: 600;
+  }
+  .pulse {
+    width: 8px; height: 8px; background: var(--green); border-radius: 50%;
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+  }
+
+  /* ── Misc ── */
+  .divider { height: 1px; background: var(--border); margin: 20px 0; }
+  .section-title { font-size: 14px; font-weight: 700; margin-bottom: 14px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+  .empty-state .emoji { font-size: 40px; margin-bottom: 12px; }
+  .empty-state h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+  select.form-input { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px; }
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 100;
+    background: #111; color: #fff; padding: 12px 20px; border-radius: 10px;
+    font-size: 13px; font-weight: 600; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    transform: translateY(80px); opacity: 0; transition: all 0.25s;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { border-left: 3px solid var(--green); }
+  .tag {
+    display: inline-block; background: var(--accent); color: #111;
+    padding: 3px 8px; border-radius: 5px; font-size: 12px; font-weight: 700;
+    cursor: pointer; transition: opacity 0.15s;
+  }
+  .tag:hover { opacity: 0.8; }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200; opacity: 0; transition: opacity 0.2s; pointer-events: none;
+  }
+  .modal-overlay.open { opacity: 1; pointer-events: all; }
+  .modal {
+    background: var(--card-bg); border-radius: 14px; width: 560px; max-width: 95vw;
+    max-height: 85vh; overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    transform: translateY(20px); transition: transform 0.2s;
+  }
+  .modal-overlay.open .modal { transform: translateY(0); }
+  .modal-header {
+    padding: 20px 24px 0; display: flex; align-items: center; justify-content: space-between;
+  }
+  .modal-title { font-size: 18px; font-weight: 800; }
+  .modal-close {
+    width: 28px; height: 28px; border-radius: 50%; border: none;
+    background: var(--border); cursor: pointer; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s;
+  }
+  .modal-close:hover { background: #ccc; }
+  .modal-body { padding: 20px 24px 24px; }
+
+  .provider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+  .provider-tile {
+    border: 2px solid var(--border); border-radius: 10px; padding: 14px;
+    cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 12px;
+    position: relative;
+  }
+  .provider-tile:hover:not(.disabled) { border-color: var(--accent); background: #fffbeb; }
+  .provider-tile.selected { border-color: var(--accent); background: #fffbeb; }
+  .provider-tile.disabled { opacity: 0.45; cursor: not-allowed; }
+  .provider-tile-logo {
+    width: 38px; height: 38px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 13px; flex-shrink: 0;
+  }
+  .provider-tile-name { font-size: 13px; font-weight: 700; }
+  .provider-tile-status { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+  .soon-badge {
+    position: absolute; top: 8px; right: 8px;
+    background: var(--border); color: var(--text-muted);
+    font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">BB</div>
+      <div>
+        <div class="logo-text">BillBridge</div>
+        <div class="logo-sub">Auto · Rechnungen · Slack</div>
+      </div>
+    </div>
+
+    <div class="sidebar-search">
+      <span class="search-icon">🔍</span>
+      <input type="text" placeholder="Suchen …" id="searchInput" oninput="handleSearch(this.value)">
+      <span class="search-shortcut">⌘K</span>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="nav-item active" onclick="navigate('dashboard')" id="nav-dashboard">
+        <span class="nav-icon">◎</span> Übersicht
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Verwaltung</div>
+      <div class="nav-item" onclick="navigate('providers')" id="nav-providers">
+        <span class="nav-icon">⚡</span> Anbieter
+        <span class="nav-badge" id="badge-providers">1</span>
+      </div>
+      <div class="nav-item" onclick="navigate('invoices')" id="nav-invoices">
+        <span class="nav-icon">📄</span> Rechnungen
+        <span class="nav-badge" id="badge-invoices" style="display:none">0</span>
+      </div>
+      <div class="nav-item" onclick="navigate('slack')" id="nav-slack">
+        <span class="nav-icon">#</span> Slack-Verbindung
+      </div>
+      <div class="nav-item" onclick="navigate('automation')" id="nav-automation">
+        <span class="nav-icon">⏱</span> Automatisierung
+      </div>
+    </div>
+
+    <div class="sidebar-bottom">
+      <div class="nav-item" onclick="navigate('settings')" id="nav-settings">
+        <span class="nav-icon">⚙</span> Einstellungen
+      </div>
+      <div class="nav-item" onclick="navigate('logs')" id="nav-logs">
+        <span class="nav-icon">?</span> Hilfe & Logs
+      </div>
+      <div class="user-chip" id="userChip">
+        <div class="user-avatar" id="userAvatar">PK</div>
+        <div>
+          <div class="user-name" id="userName">Patrick Kipp</div>
+          <div class="user-email" id="userEmail">hero-software.de</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main" id="mainContent">
+    <!-- Loaded dynamically -->
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Add Provider Modal -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModalOnBg(event)">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle">Anbieter hinzufügen</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<script>
+let currentPage = 'dashboard';
+let runPoller = null;
+let invoices = [];
+let selectedInvoice = null;
+
+// ── Navigation ──────────────────────────────────────────────────────────────
+function navigate(page) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const navEl = document.getElementById('nav-' + page);
+  if (navEl) navEl.classList.add('active');
+  currentPage = page;
+  renderPage(page);
+}
+
+function renderPage(page) {
+  const pages = {
+    dashboard: renderDashboard,
+    invoices: renderInvoices,
+    providers: renderProviders,
+    slack: renderSlack,
+    automation: renderAutomation,
+    settings: renderSettings,
+    logs: renderLogs,
+  };
+  if (pages[page]) pages[page]();
+}
+
+// ── Dashboard ───────────────────────────────────────────────────────────────
+async function renderDashboard() {
+  const data = await fetchJSON('/api/dashboard');
+  const main = document.getElementById('mainContent');
+
+  const initials = data.user_name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
+  document.getElementById('userAvatar').textContent = initials;
+  document.getElementById('userName').textContent = data.user_name;
+
+  const nextRunLabel = data.next_run;
+
+  main.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-title">BillBridge — <span>Übersicht</span></div>
+      <div style="display:flex;gap:10px;align-items:center">
+        ${data.running ? `<div class="running-badge"><div class="pulse"></div> Läuft gerade…</div>` : ''}
+        <button class="btn btn-primary" onclick="triggerRun(false)" ${data.running ? 'disabled' : ''} id="syncBtn">
+          ⚡ Jetzt synchronisieren
+        </button>
+      </div>
+    </div>
+    <div class="content">
+      <div class="greeting">Hallo, ${data.user_name.split(' ')[0]} 👋</div>
+      <div class="greeting-sub">
+        ${data.running
+          ? '🔄 BillBridge läuft gerade – neue Rechnungen werden geholt…'
+          : data.last_run
+            ? `Letzter Lauf: ${data.last_run} · ${data.last_count} Rechnung(en) verarbeitet`
+            : 'Noch kein Lauf gestartet. Klick auf <a href="#" onclick="triggerRun(false);return false;">Jetzt synchronisieren</a>.'
+        }
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Anbieter</div>
+          <div class="stat-value">${data.providers.length}</div>
+          <div class="stat-sub">Amazon aktiv</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Rechnungen</div>
+          <div class="stat-value">${data.total_invoices}</div>
+          <div class="stat-sub">lokal gespeichert</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">An Slack gesendet</div>
+          <div class="stat-value stat-yellow">${data.seen_count}</div>
+          <div class="stat-sub">eindeutige Bestellungen</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Nächster Lauf</div>
+          <div class="stat-value" style="font-size:18px;margin-top:4px">${data.next_run.includes(':') ? data.next_run.split(' ').pop() : '–'}</div>
+          <div class="stat-sub">${data.next_run}</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <div class="card-title">Letzte Läufe</div>
+          <div class="card-sub">Alle Läufe</div>
+          ${data.recent_invoices.length === 0
+            ? `<div class="empty-state"><div class="emoji">📭</div><h3>Noch keine Rechnungen</h3><p>Starte einen Sync um Rechnungen zu holen.</p></div>`
+            : data.recent_invoices.map(inv => `
+              <div class="run-item">
+                <div class="run-dot green"></div>
+                <div>
+                  <div class="run-label">Amazon · ${inv.order_id}</div>
+                  <div class="run-sub">${inv.size_kb} KB · PDF</div>
+                </div>
+                <div class="run-meta">${inv.date}</div>
+              </div>
+            `).join('')
+          }
+        </div>
+
+        <div>
+          <div class="card">
+            <div class="card-title">Anbieter Status</div>
+            <div style="margin-top:10px">
+              ${data.providers.map(p => `
+                <div class="provider-item">
+                  <div class="provider-logo" style="background:${p.color}20;color:${p.color}">${p.name.slice(0,2).toUpperCase()}</div>
+                  <div>
+                    <div class="provider-name">${p.name}</div>
+                    <div class="provider-status"><span class="status-dot green"></span>aktiv</div>
+                  </div>
+                  <div class="provider-count">${p.count}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          <div class="next-run-card" style="margin-top:16px">
+            <div class="next-run-label">Nächster automatischer Lauf</div>
+            <div class="next-run-time">${data.next_run.includes(':') ? data.next_run.split(' ').pop() : '08:00'} Uhr</div>
+            <div class="next-run-sub">Läuft werktäglich · ${data.next_run}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (data.running && !runPoller) startPolling();
+}
+
+// ── Invoices ─────────────────────────────────────────────────────────────────
+async function renderInvoices() {
+  invoices = await fetchJSON('/api/invoices');
+  const badge = document.getElementById('badge-invoices');
+  badge.textContent = invoices.length;
+  badge.style.display = invoices.length ? '' : 'none';
+
+  const main = document.getElementById('mainContent');
+  main.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-title">BillBridge — <span>Rechnungen</span></div>
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-ghost" onclick="triggerRun(false)">⚡ Sync starten</button>
+      </div>
+    </div>
+    <div class="content" style="padding:0">
+      ${invoices.length === 0
+        ? `<div class="empty-state" style="padding-top:120px"><div class="emoji">📭</div><h3>Keine Rechnungen</h3><p>Starte einen Sync um Amazon-Rechnungen herunterzuladen.</p><br><button class="btn btn-primary" onclick="triggerRun(false)">Jetzt synchronisieren</button></div>`
+        : `<div class="invoice-layout" style="padding:20px;gap:16px">
+            <div class="invoice-list" id="invoiceList">
+              ${invoices.map((inv, i) => `
+                <div class="invoice-item ${i===0?'active':''}" onclick="selectInvoice(${i})" id="inv-${i}">
+                  <div class="invoice-icon">📄</div>
+                  <div>
+                    <div class="invoice-name">${inv.order_id}</div>
+                    <div class="invoice-meta">${inv.provider} · ${inv.date} · ${inv.size_kb} KB</div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            <div class="invoice-preview" id="invoicePreview">
+              ${invoices[0] ? invoicePreviewHTML(0) : ''}
+            </div>
+          </div>`
+      }
+    </div>
+  `;
+}
+
+function invoicePreviewHTML(i) {
+  const inv = invoices[i];
+  return `
+    <div class="invoice-preview-bar">
+      <div>
+        <div class="invoice-preview-name">${inv.filename}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${inv.provider} · ${inv.date} · ${inv.size_kb} KB</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="sendToSlack('${inv.filename}')">📤 In Slack senden</button>
+        <a class="btn btn-ghost" href="/api/invoice/${inv.filename}" download="${inv.filename}">⬇ Download</a>
+      </div>
+    </div>
+    <iframe class="invoice-preview-frame" src="/api/invoice/${inv.filename}"></iframe>
+  `;
+}
+
+function selectInvoice(i) {
+  document.querySelectorAll('.invoice-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('inv-' + i).classList.add('active');
+  document.getElementById('invoicePreview').innerHTML = invoicePreviewHTML(i);
+}
+
+async function sendToSlack(filename) {
+  showToast('Wird gesendet…');
+  const resp = await fetch('/api/run', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({headless: true})});
+  showToast('✅ Gesendet!', 'success');
+}
+
+// ── Providers ────────────────────────────────────────────────────────────────
+async function renderProviders() {
+  const [providers, invoices, amazon] = await Promise.all([
+    fetchJSON('/api/providers'),
+    fetchJSON('/api/invoices'),
+    fetchJSON('/api/amazon'),
+  ]);
+  const main = document.getElementById('mainContent');
+
+  // Lade Session-Status für alle custom Provider parallel
+  const sessionStatuses = {};
+  await Promise.all(providers.filter(p => p.custom).map(async p => {
+    const s = await fetchJSON('/api/session_status/' + p.id);
+    sessionStatuses[p.id] = s;
+  }));
+
+  const providerCards = providers.map(p => {
+    const abbr = p.name.split(/\s+/).map(w=>w[0]).join('').toUpperCase().slice(0,2);
+    const bg = p.color + '20';
+    const count = p.id === 'amazon' ? invoices.length : 0;
+    const isAmazon = p.id === 'amazon';
+    const hasCredentials = isAmazon || (p.email && p.password);
+    const hasSession = isAmazon || sessionStatuses[p.id]?.has_session;
+    const browserOpen = !isAmazon && sessionStatuses[p.id]?.browser_open;
+
+    let statusClass, dotClass, statusLabel, actionBtns;
+    if (isAmazon) {
+      statusClass = 'active'; dotClass = 'green'; statusLabel = 'Aktiv';
+      actionBtns = `<button class="btn btn-ghost" onclick="triggerRun()" style="color:var(--accent);font-weight:600">▶ Ausführen</button>`;
+    } else if (!hasCredentials) {
+      statusClass = 'warning'; dotClass = 'yellow'; statusLabel = 'Keine Zugangsdaten';
+      actionBtns = '';
+    } else if (browserOpen) {
+      statusClass = 'warning'; dotClass = 'yellow'; statusLabel = 'Warte auf Login…';
+      actionBtns = `<button class="btn btn-primary" onclick="saveSession('${p.id}')" style="font-size:12px">💾 Session speichern</button>`;
+    } else if (!hasSession) {
+      statusClass = 'warning'; dotClass = 'yellow'; statusLabel = 'Session fehlt';
+      actionBtns = `<button class="btn btn-primary" onclick="setupSession('${p.id}')" style="font-size:12px">🔑 Session einrichten</button>`;
+    } else {
+      statusClass = 'active'; dotClass = 'green'; statusLabel = 'Aktiv';
+      actionBtns = `<button class="btn btn-ghost" onclick="runProvider('${p.id}')" style="color:var(--accent);font-weight:600">▶ Ausführen</button>`;
+    }
+
+    return `
+      <div class="provider-card" id="pcard-${p.id}">
+        <div class="provider-badge" style="background:${bg};color:${p.color}">${abbr}</div>
+        <div class="provider-info">
+          <h3>${p.name}</h3>
+          <p>${p.email || (isAmazon ? amazon.email : '–') || 'Keine E-Mail'} · ${count} Rechnungen</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="status-pill ${statusClass}">
+            <span class="status-dot ${dotClass}"></span>
+            ${statusLabel}
+          </span>
+          ${actionBtns}
+          ${p.custom ? `<button class="btn btn-ghost" onclick="setupSession('${p.id}')" title="Session einrichten / erneuern" style="font-size:13px">🔑</button>` : ''}
+          <button class="btn btn-ghost" onclick="openEditProvider('${p.id}')">Bearbeiten</button>
+          ${p.custom ? `<button class="btn btn-ghost" style="color:var(--red)" onclick="deleteProvider('${p.id}')">✕</button>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  main.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-title">BillBridge — <span>Anbieter</span></div>
+      <button class="btn btn-primary" onclick="openAddProviderModal()">+ Anbieter hinzufügen</button>
+    </div>
+    <div class="content">
+      <p class="card-sub" style="margin-bottom:20px">
+        BillBridge meldet sich bei konfigurierten Anbietern an und holt Rechnungen automatisch.
+      </p>
+      ${providerCards}
+    </div>
+  `;
+}
+
+async function openEditProvider(id) {
+  const providers = await fetchJSON('/api/providers');
+  const amazon = await fetchJSON('/api/amazon');
+  const p = providers.find(x => x.id === id);
+  if (!p) return;
+
+  if (id === 'amazon') {
+    document.getElementById('modalTitle').textContent = 'Amazon Business bearbeiten';
+    document.getElementById('modalBody').innerHTML = `
+      <div class="form-group">
+        <label class="form-label">E-Mail-Adresse</label>
+        <input class="form-input" id="amzEmail" value="${amazon.email || ''}" placeholder="deine@email.de">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Passwort</label>
+        <input class="form-input" type="password" id="amzPassword"
+          placeholder="${amazon.password_set ? 'Nicht ändern → leer lassen' : 'Passwort eingeben'}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Domain</label>
+        <select class="form-input" id="amzDomain">
+          <option value="amazon.de" ${amazon.domain==='amazon.de'?'selected':''}>amazon.de</option>
+          <option value="amazon.com" ${amazon.domain==='amazon.com'?'selected':''}>amazon.com</option>
+          <option value="amazon.co.uk" ${amazon.domain==='amazon.co.uk'?'selected':''}>amazon.co.uk</option>
+        </select>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
+        <button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
+        <button class="btn btn-primary" onclick="saveAmazon()">💾 Speichern</button>
+      </div>
+    `;
+  } else {
+    openCustomProviderForm(p);
+  }
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function deleteProvider(id) {
+  if (!confirm('Anbieter wirklich löschen?')) return;
+  await fetch('/api/providers/' + id, {method: 'DELETE'});
+  showToast('Anbieter gelöscht', '');
+  renderProviders();
+}
+
+async function saveAmazon() {
+  const data = {
+    email: document.getElementById('amzEmail').value,
+    password: document.getElementById('amzPassword').value,
+    domain: document.getElementById('amzDomain')?.value || 'amazon.de',
+    months_back: document.getElementById('amzMonths')?.value || 1,
+  };
+  await fetch('/api/amazon', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
+  closeModal();
+  showToast('✅ Amazon gespeichert', 'success');
+  renderProviders();
+}
+
+// ── Slack ────────────────────────────────────────────────────────────────────
+async function renderSlack() {
+  const slack = await fetchJSON('/api/slack');
+  const main = document.getElementById('mainContent');
+  main.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-title">BillBridge — <span>Slack-Verbindung</span></div>
+      <button class="btn btn-primary" onclick="saveSlack()">💾 Speichern</button>
+    </div>
+    <div class="content">
+      <div class="card" style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div>
+            <div class="card-title">Workspace</div>
+            <div class="card-sub">Verbinde BillBridge mit deinem Slack-Workspace.</div>
+          </div>
+          ${slack.connected
+            ? `<span class="connected-badge">✓ Verbunden</span>`
+            : `<span class="status-pill warning">Nicht verbunden</span>`}
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Bot Token <span style="font-size:11px;color:var(--text-muted)">(xoxb-…)</span></label>
+          <input class="form-input mono" id="slackBot" value="${slack.bot_token || ''}" placeholder="xoxb-…">
+          <div class="form-hint">Scopes: files:write, chat:write</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">User Token <span style="font-size:11px;color:var(--text-muted)">(xoxp-…)</span></label>
+          <input class="form-input mono" id="slackUser" value="${slack.user_token || ''}" placeholder="xoxp-…">
+          <div class="form-hint">Scopes: files:write, chat:write, im:write – benötigt für Moss-DM</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">Channel-Zuordnung</div>
+        <div class="card-sub">Wohin sollen Rechnungen gepostet werden?</div>
+
+        <div class="form-group" style="margin-top:16px">
+          <label class="form-label">Standard-Channel (Channel-ID)</label>
+          <input class="form-input mono" id="slackChannel" value="${slack.channel_id || ''}" placeholder="C0123456789">
+          <div class="form-hint">Rechtsklick auf Channel in Slack → "View channel details" → ID ganz unten</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Moss-App Integration</div>
+        <div class="card-sub">Rechnungen direkt in den Chat mit der Moss-App senden.</div>
+
+        <div class="form-group" style="margin-top:16px">
+          <label class="form-label">Moss Bot-User-ID</label>
+          <input class="form-input mono" id="mossId" value="${slack.moss_user_id || ''}" placeholder="U0123456789">
+          <div class="form-hint">In Slack: Rechtsklick auf Moss → "View app details" → ID aus der URL</div>
+        </div>
+
+        <div style="background:var(--content-bg);border-radius:8px;padding:14px;margin-top:4px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px">Nachrichten-Vorschau</div>
+          <div style="font-size:12px;background:white;border-radius:6px;padding:10px;border:1px solid var(--border)">
+            📄 Amazon Rechnung: <strong>Amazon_Rechnung_303-XXXXXXX</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function saveSlack() {
+  const data = {
+    bot_token: document.getElementById('slackBot').value,
+    user_token: document.getElementById('slackUser').value,
+    channel_id: document.getElementById('slackChannel').value,
+    moss_user_id: document.getElementById('mossId').value,
+  };
+  await fetch('/api/slack', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
+  showToast('✅ Slack-Verbindung gespeichert', 'success');
+}
+
+// ── Automation ───────────────────────────────────────────────────────────────
+async function renderAutomation() {
+  const s = await fetchJSON('/api/settings');
+  const main = document.getElementById('mainContent');
+  const days = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+  main.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-title">BillBridge — <span>Automatisierung</span></div>
+      <button class="btn btn-primary" onclick="saveAutomation()">💾 Speichern</button>
+    </div>
+    <div class="content">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div class="card">
+          <div class="card-title">Zeitplan</div>
+          <div class="card-sub">Wann soll BillBridge nach Rechnungen suchen?</div>
+
+          <div class="form-group" style="margin-top:16px">
+            <div class="form-label">Häufigkeit</div>
+            <div class="toggle-group">
+              ${['Täglich','Wöchentlich','Manuell'].map(f => `
+                <button class="toggle-btn ${s.schedule_frequency===f.toLowerCase()?'active':''}"
+                  onclick="setFrequency('${f.toLowerCase()}',this)">${f}</button>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="form-group">
+            <div class="form-label">Uhrzeit</div>
+            <input class="time-input" type="time" id="schedTime" value="${s.schedule_time}">
+          </div>
+
+          <div class="form-group">
+            <div class="form-label">Tage</div>
+            <div class="toggle-group" id="daysGroup">
+              ${days.map(d => `
+                <button class="toggle-btn ${s.schedule_days.includes(d)?'active':''}"
+                  onclick="toggleDay('${d}',this)">${d}</button>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Regeln</div>
+          <div class="card-sub">Verhalten bei automatischen Läufen</div>
+
+          ${[
+            {id:'checkOnStart', label:'Auch beim Mac-Start prüfen', desc:'Holt verpasste Rechnungen nach, wenn der Mac aus war', key:'rule_check_on_start'},
+            {id:'retryOnError', label:'Bei Fehler bis zu 3× erneut versuchen', desc:'Mit 10 Min. Abstand zwischen den Versuchen', key:'rule_retry_on_error'},
+            {id:'skipDupes', label:'Duplikate überspringen', desc:'Bereits hochgeladene Rechnungen nicht erneut posten', key:'rule_skip_duplicates'},
+            {id:'macNotif', label:'macOS-Mitteilung nach jedem Lauf', desc:'Kurze Zusammenfassung als Benachrichtigung', key:'rule_macos_notification'},
+          ].map(r => `
+            <div class="rule-item">
+              <div>
+                <div class="rule-label">${r.label}</div>
+                <div class="rule-desc">${r.desc}</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="${r.id}" ${s[r.key]?'checked':''}>
+                <span class="slider"></span>
+              </label>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <div class="card-title">Datei-Benennung</div>
+        <div class="card-sub">Schema für die heruntergeladenen PDFs. Platzhalter werden automatisch ersetzt.</div>
+        <div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap">
+          ${['{Jahr}','{Monat}','{Anbieter}','{Betrag}€'].map(t => `
+            <span class="tag" onclick="insertTag('${t}')">${t}</span>
+          `).join('')}
+        </div>
+        <input class="form-input" id="filenamePattern" value="${s.filename_pattern}">
+        <div class="form-hint" style="margin-top:8px">Vorschau: <strong id="filenamePreview"></strong></div>
+      </div>
+    </div>
+  `;
+  updateFilenamePreview();
+  document.getElementById('filenamePattern').addEventListener('input', updateFilenamePreview);
+}
+
+let selectedFrequency = 'täglich';
+let selectedDays = ['Mo','Di','Mi','Do','Fr'];
+
+function setFrequency(f, el) {
+  selectedFrequency = f;
+  document.querySelectorAll('.toggle-btn').forEach(b => {
+    if (['täglich','wöchentlich','manuell'].includes(b.textContent.toLowerCase())) b.classList.remove('active');
+  });
+  el.classList.add('active');
+}
+
+function toggleDay(d, el) {
+  el.classList.toggle('active');
+}
+
+function insertTag(tag) {
+  const input = document.getElementById('filenamePattern');
+  input.value += tag;
+  updateFilenamePreview();
+}
+
+function updateFilenamePreview() {
+  const pattern = document.getElementById('filenamePattern')?.value || '';
+  const preview = pattern
+    .replace('{Jahr}', '2026')
+    .replace('{Monat}', '06')
+    .replace('{Anbieter}', 'Amazon')
+    .replace('{Betrag}€', '73,24€');
+  const el = document.getElementById('filenamePreview');
+  if (el) el.textContent = preview + '.pdf';
+}
+
+async function saveAutomation() {
+  const activeDays = [...document.querySelectorAll('#daysGroup .toggle-btn.active')].map(b => b.textContent);
+  const data = await fetchJSON('/api/settings');
+  Object.assign(data, {
+    schedule_time: document.getElementById('schedTime').value,
+    schedule_days: activeDays,
+    rule_check_on_start: document.getElementById('checkOnStart').checked,
+    rule_retry_on_error: document.getElementById('retryOnError').checked,
+    rule_skip_duplicates: document.getElementById('skipDupes').checked,
+    rule_macos_notification: document.getElementById('macNotif').checked,
+    filename_pattern: document.getElementById('filenamePattern').value,
+  });
+  await fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
+  showToast('✅ Automatisierung gespeichert', 'success');
+}
+
+// ── Settings ─────────────────────────────────────────────────────────────────
+async function renderSettings() {
+  const s = await fetchJSON('/api/settings');
+  const colors = ['#FFD700','#3b82f6','#22c55e','#ef4444','#a855f7'];
+  const main = document.getElementById('mainContent');
+  main.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-title">BillBridge — <span>Einstellungen</span></div>
+      <button class="btn btn-primary" onclick="saveSettings()">💾 Speichern</button>
+    </div>
+    <div class="content">
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:20px">
+        BillBridge 1.0.0 · läuft lokal auf diesem Mac
+      </p>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">Download-Ordner</div>
+            <div class="settings-desc">Hier werden die PDFs zwischengespeichert</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="background:var(--content-bg);padding:6px 12px;border-radius:7px;font-size:12px;font-family:monospace">
+              📁 ${s.download_folder.replace(/.*\//, '~/…/')}
+            </span>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">PDFs nach Upload behalten</div>
+            <div class="settings-desc">Lokale Kopie nach dem Slack-Upload aufbewahren</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="keepPdfs" ${s.keep_pdfs?'checked':''}>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="settings-row" style="border-bottom:none">
+          <div>
+            <div class="settings-label">Sprache</div>
+          </div>
+          <select class="form-input" style="width:160px" id="langSelect">
+            <option value="de" selected>Deutsch</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">Akzentfarbe</div>
+        <div class="card-sub">Standard ist HERO-Gelb. Du kannst BillBridge an eure Marke anpassen.</div>
+        <div class="color-swatches" style="margin-top:12px">
+          ${colors.map(c => `
+            <div class="color-swatch ${c===s.accent_color?'selected':''}"
+              style="background:${c}" onclick="setAccent('${c}',this)" title="${c}"></div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="keychain-row">
+          <div class="keychain-icon">🔑</div>
+          <div class="keychain-info">
+            <h4>Zugangsdaten im Schlüsselbund</h4>
+            <p>Logins verschlüsselt gespeichert · nichts verlässt deinen Mac</p>
+          </div>
+          <button class="btn btn-ghost" onclick="navigate('providers')">Verwalten</button>
+        </div>
+      </div>
+
+      <button class="btn btn-danger" onclick="confirmDisconnect()">↪ Alle Verbindungen trennen</button>
+    </div>
+  `;
+}
+
+function setAccent(color, el) {
+  document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+  el.classList.add('selected');
+  document.documentElement.style.setProperty('--accent', color);
+}
+
+function confirmDisconnect() {
+  if (confirm('Alle Slack-Token und Amazon-Zugangsdaten löschen?')) {
+    showToast('Verbindungen getrennt', '');
+  }
+}
+
+async function saveSettings() {
+  const data = await fetchJSON('/api/settings');
+  Object.assign(data, {
+    keep_pdfs: document.getElementById('keepPdfs').checked,
+    accent_color: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
+  });
+  await fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
+  showToast('✅ Einstellungen gespeichert', 'success');
+}
+
+// ── Logs ─────────────────────────────────────────────────────────────────────
+async function renderLogs() {
+  const data = await fetchJSON('/api/logs');
+  const status = await fetchJSON('/api/status');
+  const main = document.getElementById('mainContent');
+
+  const colorLine = l => {
+    if (l.includes('Fehler') || l.includes('Error')) return `<span class="log-err">${l}</span>`;
+    if (l.includes('->') || l.includes('erfolgreich') || l.includes('OK')) return `<span class="log-ok">${l}</span>`;
+    if (l.includes('===') || l.includes('Öffne')) return `<span class="log-info">${l}</span>`;
+    return l;
+  };
+
+  const allLines = [...(status.log || []), ...(data.lines || [])];
+
+  main.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-title">BillBridge — <span>Hilfe & Logs</span></div>
+      <button class="btn btn-ghost" onclick="renderLogs()">↺ Aktualisieren</button>
+    </div>
+    <div class="content">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">Letzter Lauf</div>
+        <div class="card-sub" style="margin-bottom:12px">${status.last_run || 'Noch kein Lauf'}</div>
+        <div class="log-box" id="logBox">${
+          allLines.length
+            ? allLines.map(colorLine).join('\n')
+            : '<span style="color:#555">Noch keine Logs vorhanden. Starte einen Sync.</span>'
+        }</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Hilfe</div>
+        <div style="margin-top:12px">
+          <div class="run-item">
+            <div class="run-dot yellow"></div>
+            <div><div class="run-label">Browser schließt sich sofort</div><div class="run-sub">Verwende <code>--no-headless</code> und bestätige 2FA im Browser</div></div>
+          </div>
+          <div class="run-item">
+            <div class="run-dot yellow"></div>
+            <div><div class="run-label">0 Rechnungen gefunden</div><div class="run-sub">Prüfe ob "Paid By You" Filter auf Amazon aktiv ist</div></div>
+          </div>
+          <div class="run-item">
+            <div class="run-dot yellow"></div>
+            <div><div class="run-label">Slack-Fehler: missing_scope</div><div class="run-sub">Scope im Slack App-Dashboard hinzufügen und App neu installieren</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  const lb = document.getElementById('logBox');
+  if (lb) lb.scrollTop = lb.scrollHeight;
+}
+
+// ── Sync ──────────────────────────────────────────────────────────────────────
+async function setupSession(providerId) {
+  const resp = await fetch('/api/setup_session/' + providerId, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+  });
+  const data = await resp.json();
+  if (data.ok) {
+    showToast('🔑 Neues Chrome-Fenster wird geöffnet – bitte dort einloggen, dann "Session speichern" klicken.');
+    // Warten bis Browser offen ist, dann neu rendern
+    const poller = setInterval(async () => {
+      const s = await fetchJSON('/api/status');
+      if (!s.running) {
+        clearInterval(poller);
+        renderProviders();
+      }
+    }, 1500);
+  } else {
+    showToast('⚠ ' + (data.error || 'Fehler'));
+  }
+}
+
+async function saveSession(providerId) {
+  const resp = await fetch('/api/save_session/' + providerId, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+  });
+  const data = await resp.json();
+  if (data.ok) {
+    showToast('⏳ Session wird gespeichert…');
+    const poller = setInterval(async () => {
+      const s = await fetchJSON('/api/status');
+      if (!s.running) {
+        clearInterval(poller);
+        const last = s.log[s.log.length - 1] || '';
+        if (last.includes('✅')) {
+          showToast('✅ Session gespeichert – Sync jetzt möglich!', 'success');
+        } else {
+          showToast('⚠ Noch nicht eingeloggt? Bitte erst einloggen, dann nochmal klicken.');
+        }
+        renderProviders();
+      }
+    }, 1500);
+  } else {
+    showToast('⚠ ' + (data.error || 'Fehler'));
+  }
+}
+
+async function runProvider(providerId, headless = false) {
+  const resp = await fetch('/api/run_provider/' + providerId, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({headless})
+  });
+  const data = await resp.json();
+  if (data.ok) {
+    showToast('⚡ ' + providerId + ' Sync gestartet…');
+    startPolling();
+    setTimeout(() => renderPage(currentPage), 500);
+  } else {
+    showToast('⚠ ' + (data.error || 'Fehler'));
+  }
+}
+
+async function triggerRun(noHeadless = false) {
+  const resp = await fetch('/api/run', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({headless: !noHeadless})
+  });
+  const data = await resp.json();
+  if (data.ok) {
+    showToast('⚡ Sync gestartet…');
+    startPolling();
+    setTimeout(() => renderPage(currentPage), 500);
+  } else {
+    showToast('⚠ ' + (data.error || 'Fehler'));
+  }
+}
+
+function startPolling() {
+  if (runPoller) return;
+  runPoller = setInterval(async () => {
+    const s = await fetchJSON('/api/status');
+    if (!s.running) {
+      clearInterval(runPoller);
+      runPoller = null;
+      showToast(`✅ Sync abgeschlossen · ${s.last_count} Rechnung(en)`, 'success');
+      renderPage(currentPage);
+    } else if (currentPage === 'logs') {
+      renderLogs();
+    }
+  }, 2000);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast' + (type ? ' ' + type : '');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+function handleSearch(val) {
+  if (!val) return;
+  if ('rechnungen'.includes(val.toLowerCase())) navigate('invoices');
+  else if ('anbieter'.includes(val.toLowerCase())) navigate('providers');
+  else if ('slack'.includes(val.toLowerCase())) navigate('slack');
+  else if ('auto'.includes(val.toLowerCase())) navigate('automation');
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+const PROVIDERS_CATALOG = [
+  { id: 'amazon',    name: 'Amazon Business', color: '#FF9900', bg: '#FF990020', abbr: 'AM', active: true,  desc: 'Rechnungen automatisch herunterladen' },
+  { id: 'telekom',   name: 'Telekom',          color: '#E20074', bg: '#E2007420', abbr: 'TK', active: false, desc: 'Monatsrechnungen & Einzelverbindungen' },
+  { id: 'adobe',     name: 'Adobe',            color: '#FF0000', bg: '#FF000015', abbr: 'AD', active: false, desc: 'Creative Cloud & Acrobat Rechnungen' },
+  { id: 'stripe',    name: 'Stripe',           color: '#635BFF', bg: '#635BFF15', abbr: 'ST', active: false, desc: 'Gebühren & Auszahlungsbelege' },
+  { id: 'aws',       name: 'AWS',              color: '#FF9900', bg: '#FF990015', abbr: 'AWS',active: false, desc: 'Monatsrechnungen aus Cost Explorer' },
+  { id: 'dropbox',   name: 'Dropbox',          color: '#0061FF', bg: '#0061FF15', abbr: 'DB', active: false, desc: 'Abo-Rechnungen herunterladen' },
+];
+
+let selectedProvider = null;
+
+function openAddProviderModal() {
+  selectedProvider = null;
+  document.getElementById('modalTitle').textContent = 'Anbieter hinzufügen';
+  document.getElementById('modalBody').innerHTML = renderProviderPicker();
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function renderProviderPicker() {
+  return `
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
+      Wähle einen Anbieter oder füge einen eigenen hinzu.
+    </p>
+    <div class="provider-grid">
+      ${PROVIDERS_CATALOG.map(p => `
+        <div class="provider-tile ${p.active ? '' : 'disabled'}" id="tile-${p.id}"
+          onclick="${p.active ? `selectProviderTile('${p.id}')` : ''}">
+          <div class="provider-tile-logo" style="background:${p.bg};color:${p.color}">${p.abbr}</div>
+          <div>
+            <div class="provider-tile-name">${p.name}</div>
+            <div class="provider-tile-status">${p.active ? p.desc : 'Kommt bald'}</div>
+          </div>
+          ${!p.active ? '<span class="soon-badge">Bald</span>' : ''}
+        </div>
+      `).join('')}
+      <div class="provider-tile" id="tile-custom" onclick="selectProviderTile('custom')">
+        <div class="provider-tile-logo" style="background:#f0f0f0;color:#666;font-size:20px">＋</div>
+        <div>
+          <div class="provider-tile-name">Eigener Anbieter</div>
+          <div class="provider-tile-status">Galaxus, CoolBlue, …</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end">
+      <button class="btn btn-primary" id="nextBtn" onclick="showProviderForm()" disabled
+        style="opacity:0.4;cursor:not-allowed">
+        Weiter →
+      </button>
+    </div>
+  `;
+}
+
+function selectProviderTile(id) {
+  document.querySelectorAll('.provider-tile').forEach(t => t.classList.remove('selected'));
+  document.getElementById('tile-' + id).classList.add('selected');
+  selectedProvider = PROVIDERS_CATALOG.find(p => p.id === id) || {id: 'custom', name: 'Eigener Anbieter'};
+  const btn = document.getElementById('nextBtn');
+  btn.disabled = false;
+  btn.style.opacity = '1';
+  btn.style.cursor = 'pointer';
+}
+
+async function showProviderForm() {
+  if (!selectedProvider) return;
+  if (selectedProvider.id === 'custom') {
+    openCustomProviderForm(null);
+    return;
+  }
+  const p = selectedProvider;
+  const existing = await fetchJSON('/api/amazon');
+  document.getElementById('modalTitle').textContent = p.name + ' konfigurieren';
+  document.getElementById('modalBody').innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding:14px;background:var(--content-bg);border-radius:10px">
+      <div class="provider-tile-logo" style="background:${p.bg};color:${p.color};width:44px;height:44px;border-radius:10px;font-size:14px">${p.abbr}</div>
+      <div>
+        <div style="font-size:15px;font-weight:700">${p.name}</div>
+        <div style="font-size:12px;color:var(--text-muted)">${p.desc}</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">E-Mail-Adresse</label>
+      <input class="form-input" id="newEmail" value="${existing.email || ''}" placeholder="deine@email.de">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Passwort</label>
+      <input class="form-input" type="password" id="newPassword"
+        placeholder="${existing.password_set ? 'Nicht ändern → leer lassen' : 'Passwort eingeben'}">
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:8px">
+      <button class="btn btn-ghost" onclick="openAddProviderModal()">← Zurück</button>
+      <button class="btn btn-primary" onclick="saveAmazon()">✓ Speichern</button>
+    </div>
+  `;
+}
+
+function openCustomProviderForm(existing) {
+  const colors = ['#FF6B35','#4CAF50','#2196F3','#9C27B0','#F44336','#00BCD4','#FF9800','#607D8B'];
+  const cur = existing || {name:'', website:'', email:'', color: colors[0], id: null};
+  const pwPlaceholder = existing ? 'Nicht ändern → leer lassen' : 'Passwort eingeben';
+  const backFn = existing ? 'closeModal()' : 'openAddProviderModal()';
+  const saveFn = existing ? 'saveCustomProvider("' + existing.id + '")' : 'saveCustomProvider(null)';
+
+  const swatches = colors.map(function(c) {
+    const sel = c === cur.color ? 'selected' : '';
+    return '<div class="color-swatch ' + sel + '" style="background:' + c + ';width:32px;height:32px;border-radius:8px" onclick="selectCustomColor(\'' + c + '\',this)" title="' + c + '"></div>';
+  }).join('');
+
+  const previewInitials = cur.name ? cur.name.slice(0,2).toUpperCase() : 'AB';
+
+  document.getElementById('modalTitle').textContent = existing ? existing.name + ' bearbeiten' : 'Eigener Anbieter';
+  document.getElementById('modalBody').innerHTML =
+    '<div class="form-group">' +
+      '<label class="form-label">Name des Anbieters *</label>' +
+      '<input class="form-input" id="cpName" placeholder="z.B. Galaxus, CoolBlue, Otto…" value="' + cur.name + '" oninput="updateCustomPreview()">' +
+    '</div>' +
+    '<div class="form-group">' +
+      '<label class="form-label">Website</label>' +
+      '<input class="form-input" id="cpWebsite" placeholder="z.B. galaxus.de" value="' + (cur.website||'') + '">' +
+    '</div>' +
+    '<div class="form-group">' +
+      '<label class="form-label">E-Mail-Adresse</label>' +
+      '<input class="form-input" id="cpEmail" placeholder="deine@email.de" value="' + (cur.email||'') + '">' +
+    '</div>' +
+    '<div class="form-group">' +
+      '<label class="form-label">Passwort</label>' +
+      '<input class="form-input" type="password" id="cpPassword" placeholder="' + pwPlaceholder + '">' +
+    '</div>' +
+    '<div class="form-group">' +
+      '<label class="form-label">Farbe</label>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        swatches +
+        '<input type="color" id="cpColorPicker" value="' + cur.color + '" style="width:32px;height:32px;border:none;border-radius:8px;cursor:pointer;padding:0" oninput="selectCustomColorHex(this.value)">' +
+      '</div>' +
+      '<input type="hidden" id="cpColor" value="' + cur.color + '">' +
+    '</div>' +
+    '<div style="background:var(--content-bg);border-radius:10px;padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:12px">' +
+      '<div id="cpPreviewBadge" style="width:40px;height:40px;border-radius:9px;background:' + cur.color + '20;color:' + cur.color + ';display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0">' + previewInitials + '</div>' +
+      '<div>' +
+        '<div id="cpPreviewName" style="font-size:14px;font-weight:700">' + (cur.name||'Anbieter-Name') + '</div>' +
+        '<div style="font-size:12px;color:var(--text-muted)">Manueller Upload · 0 Rechnungen</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="display:flex;justify-content:space-between;margin-top:4px">' +
+      '<button class="btn btn-ghost" onclick="' + backFn + '">← Zurück</button>' +
+      '<button class="btn btn-primary" onclick="' + saveFn + '">✓ Speichern</button>' +
+    '</div>';
+
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function selectCustomColor(color, el) {
+  document.querySelectorAll('#modalBody .color-swatch').forEach(s => s.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('cpColor').value = color;
+  document.getElementById('cpColorPicker').value = color;
+  updateCustomPreview();
+}
+
+function selectCustomColorHex(color) {
+  document.querySelectorAll('#modalBody .color-swatch').forEach(s => s.classList.remove('selected'));
+  document.getElementById('cpColor').value = color;
+  updateCustomPreview();
+}
+
+function updateCustomPreview() {
+  const name = document.getElementById('cpName')?.value || '';
+  const color = document.getElementById('cpColor')?.value || '#666';
+  const badge = document.getElementById('cpPreviewBadge');
+  const nameEl = document.getElementById('cpPreviewName');
+  if (badge) {
+    badge.textContent = name ? name.slice(0,2).toUpperCase() : 'AB';
+    badge.style.background = color + '20';
+    badge.style.color = color;
+  }
+  if (nameEl) nameEl.textContent = name || 'Anbieter-Name';
+}
+
+async function saveCustomProvider(existingId) {
+  const name = document.getElementById('cpName').value.trim();
+  if (!name) { showToast('⚠ Bitte einen Namen eingeben'); return; }
+  const provider = {
+    name,
+    website: document.getElementById('cpWebsite').value.trim(),
+    email: document.getElementById('cpEmail').value.trim(),
+    password: document.getElementById('cpPassword').value,
+    color: document.getElementById('cpColor').value,
+    custom: true,
+    id: existingId || name.toLowerCase().replace(/\s+/g,'_').replace(/[^\w]/g,''),
+  };
+  await fetch('/api/providers', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(provider)});
+  closeModal();
+  showToast('✅ ' + name + ' hinzugefügt', 'success');
+  renderProviders();
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('open');
+}
+
+function closeModalOnBg(e) {
+  if (e.target === document.getElementById('modalOverlay')) closeModal();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async () => {
+  const s = await fetchJSON('/api/settings');
+  if (s.accent_color) document.documentElement.style.setProperty('--accent', s.accent_color);
+  const invs = await fetchJSON('/api/invoices');
+  const badge = document.getElementById('badge-invoices');
+  if (invs.length) { badge.textContent = invs.length; badge.style.display = ''; }
+  navigate('dashboard');
+  const status = await fetchJSON('/api/status');
+  if (status.running) startPolling();
+})();
+</script>
+</body>
+</html>

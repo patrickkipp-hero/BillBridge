@@ -1,0 +1,551 @@
+#!/usr/bin/env python3
+"""BillBridge – lokale Web-App"""
+
+import os
+import re
+import sys
+import json
+import threading
+import subprocess
+from pathlib import Path
+from datetime import datetime
+from flask import Flask, render_template, jsonify, request, send_file, redirect, url_for
+from dotenv import load_dotenv, set_key
+
+load_dotenv()
+
+app = Flask(__name__)
+
+BASE_DIR = Path(__file__).parent
+INVOICES_DIR = BASE_DIR / "invoices"
+SEEN_FILE = BASE_DIR / "seen_invoices.txt"
+ENV_FILE = BASE_DIR / ".env"
+LOG_FILE = BASE_DIR / "billbridge.log"
+SETTINGS_FILE = BASE_DIR / "settings.json"
+PROVIDERS_FILE = BASE_DIR / "providers.json"
+
+
+def load_providers():
+    builtin = [{"id": "amazon", "name": "Amazon Business", "color": "#FF9900", "email": os.getenv("AMAZON_EMAIL",""), "custom": False}]
+    if PROVIDERS_FILE.exists():
+        custom = json.loads(PROVIDERS_FILE.read_text())
+        return builtin + custom
+    return builtin
+
+
+def save_providers(providers):
+    custom = [p for p in providers if p.get("custom")]
+    PROVIDERS_FILE.write_text(json.dumps(custom, indent=2, ensure_ascii=False))
+
+run_status = {"running": False, "log": [], "last_run": None, "last_count": 0}
+
+# Laufende Login-Browser: provider_id → {"proc", "tmp_dir", "debug_port"}
+_session_browsers: dict = {}
+
+
+def load_settings():
+    defaults = {
+        "download_folder": str(INVOICES_DIR),
+        "start_on_login": False,
+        "keep_pdfs": True,
+        "accent_color": "#FFD700",
+        "schedule_enabled": True,
+        "schedule_frequency": "daily",
+        "schedule_time": "08:00",
+        "schedule_days": ["Mo", "Di", "Mi", "Do", "Fr"],
+        "rule_check_on_start": True,
+        "rule_retry_on_error": True,
+        "rule_skip_duplicates": True,
+        "rule_macos_notification": False,
+        "filename_pattern": "{Jahr}-{Monat}_{Anbieter}_{Betrag}€.pdf",
+    }
+    if SETTINGS_FILE.exists():
+        saved = json.loads(SETTINGS_FILE.read_text())
+        defaults.update(saved)
+    return defaults
+
+
+def save_settings(data):
+    SETTINGS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+
+
+def get_invoices():
+    INVOICES_DIR.mkdir(exist_ok=True)
+    files = sorted(INVOICES_DIR.glob("*.pdf"), key=lambda f: f.stat().st_mtime, reverse=True)
+    result = []
+    for f in files:
+        stat = f.stat()
+        order_id = re.search(r'(\d{3}-\d{7}-\d{7})', f.name)
+        result.append({
+            "filename": f.name,
+            "order_id": order_id.group(1) if order_id else f.stem,
+            "size_kb": round(stat.st_size / 1024, 1),
+            "date": datetime.fromtimestamp(stat.st_mtime).strftime("%d.%m.%Y"),
+            "provider": "Amazon",
+        })
+    return result
+
+
+def get_seen_count():
+    if SEEN_FILE.exists():
+        lines = [l.strip() for l in SEEN_FILE.read_text().splitlines() if l.strip()]
+        return len(lines)
+    return 0
+
+
+def get_env_val(key, default=""):
+    return os.getenv(key, default)
+
+
+# ── Routes ──────────────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/api/dashboard")
+def api_dashboard():
+    invoices = get_invoices()
+    settings = load_settings()
+    return jsonify({
+        "user_name": get_env_val("AMAZON_EMAIL", "Nutzer").split("@")[0].replace(".", " ").title(),
+        "total_invoices": len(invoices),
+        "seen_count": get_seen_count(),
+        "last_run": run_status["last_run"],
+        "last_count": run_status["last_count"],
+        "running": run_status["running"],
+        "next_run": f"morgen {settings['schedule_time']} Uhr" if settings["schedule_enabled"] else "manuell",
+        "recent_invoices": invoices[:5],
+        "providers": [
+            {"name": "Amazon", "status": "aktiv", "count": len(invoices), "color": "#FF9900"}
+        ],
+    })
+
+
+@app.route("/api/invoices")
+def api_invoices():
+    return jsonify(get_invoices())
+
+
+@app.route("/api/invoice/<filename>")
+def api_invoice_file(filename):
+    path = INVOICES_DIR / filename
+    if not path.exists():
+        return jsonify({"error": "not found"}), 404
+    return send_file(str(path), mimetype="application/pdf")
+
+
+@app.route("/api/slack", methods=["GET"])
+def api_slack_get():
+    return jsonify({
+        "bot_token": _mask(get_env_val("SLACK_BOT_TOKEN")),
+        "user_token": _mask(get_env_val("SLACK_USER_TOKEN")),
+        "channel_id": get_env_val("SLACK_CHANNEL_ID"),
+        "moss_user_id": get_env_val("MOSS_BOT_USER_ID"),
+        "connected": bool(get_env_val("SLACK_BOT_TOKEN")),
+    })
+
+
+@app.route("/api/slack", methods=["POST"])
+def api_slack_save():
+    data = request.json
+    _set_env("SLACK_BOT_TOKEN", data.get("bot_token", ""))
+    _set_env("SLACK_USER_TOKEN", data.get("user_token", ""))
+    _set_env("SLACK_CHANNEL_ID", data.get("channel_id", ""))
+    _set_env("MOSS_BOT_USER_ID", data.get("moss_user_id", ""))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/providers", methods=["GET"])
+def api_providers_get():
+    return jsonify(load_providers())
+
+
+@app.route("/api/providers", methods=["POST"])
+def api_providers_post():
+    providers = load_providers()
+    new = request.json
+    new["id"] = re.sub(r'\W+', '_', new["name"].lower())
+    new["custom"] = True
+    # Duplikat-Check
+    if not any(p["id"] == new["id"] for p in providers):
+        providers.append(new)
+    else:
+        providers = [new if p["id"] == new["id"] else p for p in providers]
+    save_providers(providers)
+    return jsonify({"ok": True, "provider": new})
+
+
+@app.route("/api/providers/<provider_id>", methods=["DELETE"])
+def api_providers_delete(provider_id):
+    providers = load_providers()
+    providers = [p for p in providers if p["id"] != provider_id]
+    save_providers(providers)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/amazon", methods=["GET"])
+def api_amazon_get():
+    return jsonify({
+        "email": get_env_val("AMAZON_EMAIL"),
+        "password_set": bool(get_env_val("AMAZON_PASSWORD")),
+        "domain": get_env_val("AMAZON_DOMAIN", "amazon.de"),
+        "months_back": get_env_val("MONTHS_BACK", "1"),
+    })
+
+
+@app.route("/api/amazon", methods=["POST"])
+def api_amazon_save():
+    data = request.json
+    _set_env("AMAZON_EMAIL", data.get("email", ""))
+    if data.get("password"):
+        _set_env("AMAZON_PASSWORD", data.get("password", ""))
+    _set_env("AMAZON_DOMAIN", data.get("domain", "amazon.de"))
+    _set_env("MONTHS_BACK", str(data.get("months_back", "1")))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/settings", methods=["GET"])
+def api_settings_get():
+    return jsonify(load_settings())
+
+
+@app.route("/api/settings", methods=["POST"])
+def api_settings_save():
+    save_settings(request.json)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/run", methods=["POST"])
+def api_run():
+    if run_status["running"]:
+        return jsonify({"ok": False, "error": "Läuft bereits"})
+    headless = request.json.get("headless", True)
+    thread = threading.Thread(target=_run_sync, args=(headless,))
+    thread.daemon = True
+    thread.start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/session_status/<provider_id>")
+def api_session_status(provider_id):
+    session_file = BASE_DIR / "sessions" / f"{provider_id}_session.json"
+    has_session = session_file.exists() and session_file.stat().st_size > 100
+    browser_open = provider_id in _session_browsers
+    return jsonify({"has_session": has_session, "browser_open": browser_open})
+
+
+@app.route("/api/setup_session/<provider_id>", methods=["POST"])
+def api_setup_session(provider_id):
+    if run_status["running"]:
+        return jsonify({"ok": False, "error": "Läuft bereits"})
+    providers = load_providers()
+    provider = next((p for p in providers if p["id"] == provider_id), None)
+    if not provider:
+        return jsonify({"ok": False, "error": "Anbieter nicht gefunden"})
+    thread = threading.Thread(target=_setup_session_sync, args=(provider,))
+    thread.daemon = True
+    thread.start()
+    return jsonify({"ok": True})
+
+
+def _setup_session_sync(provider: dict):
+    """Schritt 1: Login-Chrome öffnen, direkt ohne importlib."""
+    import shutil, tempfile
+
+    provider_id = provider["id"]
+    run_status["running"] = True
+    run_status["log"] = []
+
+    def _log(msg):
+        run_status["log"].append(msg)
+        with LOG_FILE.open("a") as f:
+            f.write(msg + "\n")
+
+    _log(f"=== Session-Setup: {provider['name']} ({datetime.now().isoformat()}) ===")
+
+    # Alten Browser für diesen Provider aufräumen falls noch offen
+    if provider_id in _session_browsers:
+        try:
+            _session_browsers[provider_id]["proc"].terminate()
+        except Exception:
+            pass
+        old_tmp = _session_browsers.pop(provider_id, {}).get("tmp_dir")
+        if old_tmp:
+            shutil.rmtree(old_tmp, ignore_errors=True)
+
+    chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    if not Path(chrome_path).exists():
+        _log("❌ Google Chrome nicht gefunden unter /Applications/.")
+        run_status["running"] = False
+        return
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="billbridge_login_"))
+    debug_port = 9223
+
+    _log("Öffne neues Chrome-Fenster für den Login...")
+    try:
+        proc = subprocess.Popen(
+            [
+                chrome_path,
+                f"--remote-debugging-port={debug_port}",
+                f"--user-data-dir={str(tmp_dir)}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-http2",
+                "https://www.galaxus.de/en/sign-in",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        import time as _time
+        _time.sleep(3)
+        _session_browsers[provider_id] = {
+            "proc": proc,
+            "tmp_dir": str(tmp_dir),
+            "debug_port": debug_port,
+        }
+        _log("✅ Chrome-Fenster offen. Bitte einloggen, dann 'Session speichern' klicken.")
+    except Exception as e:
+        _log(f"❌ Fehler beim Öffnen: {e}")
+        shutil.rmtree(str(tmp_dir), ignore_errors=True)
+
+    run_status["running"] = False
+
+
+@app.route("/api/save_session/<provider_id>", methods=["POST"])
+def api_save_session(provider_id):
+    """Schritt 2: Session aus dem laufenden Login-Chrome speichern."""
+    if provider_id not in _session_browsers:
+        return jsonify({"ok": False, "error": "Kein Login-Browser offen. Bitte zuerst 🔑 klicken."})
+
+    providers = load_providers()
+    provider = next((p for p in providers if p["id"] == provider_id), None)
+    if not provider:
+        return jsonify({"ok": False, "error": "Anbieter nicht gefunden"})
+
+    thread = threading.Thread(target=_save_session_sync, args=(provider,))
+    thread.daemon = True
+    thread.start()
+    return jsonify({"ok": True})
+
+
+def _save_session_sync(provider: dict):
+    """Schritt 2: Session per CDP aus dem Login-Chrome extrahieren und speichern."""
+    import shutil, tempfile, time as _time
+
+    provider_id = provider["id"]
+    run_status["running"] = True
+    run_status["log"] = []
+
+    def _log(msg):
+        run_status["log"].append(msg)
+        with LOG_FILE.open("a") as f:
+            f.write(msg + "\n")
+
+    _log(f"=== Session speichern: {provider['name']} ({datetime.now().isoformat()}) ===")
+
+    info = _session_browsers.get(provider_id)
+    if not info:
+        _log("❌ Kein Login-Browser offen. Bitte zuerst 🔑 klicken.")
+        run_status["running"] = False
+        return
+
+    debug_port = info["debug_port"]
+
+    # Python-Skript das CDP verbindet und Session speichert, als Subprocess ausführen
+    session_file = str(BASE_DIR / "sessions" / f"{provider_id}_session.json")
+    script = f"""
+import sys, time
+sys.path.insert(0, {str(BASE_DIR)!r})
+from playwright.sync_api import sync_playwright
+with sync_playwright() as pw:
+    try:
+        browser = pw.chromium.connect_over_cdp("http://localhost:{debug_port}")
+    except Exception as e:
+        print(f"CDP-Verbindung fehlgeschlagen: {{e}}")
+        sys.exit(1)
+    ctx = browser.contexts[0] if browser.contexts else browser.new_context()
+    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    print("Navigiere zur Bestellseite...")
+    try:
+        page.goto("https://www.galaxus.de/en/order", wait_until="domcontentloaded", timeout=20000)
+        time.sleep(2)
+    except Exception as e:
+        print(f"Navigation fehlgeschlagen: {{e}}")
+        browser.close()
+        sys.exit(1)
+    if "sign-in" in page.url or "id.galaxus" in page.url or "login" in page.url:
+        print("Noch nicht eingeloggt!")
+        browser.close()
+        sys.exit(1)
+    import pathlib
+    pathlib.Path({str(BASE_DIR / 'sessions')!r}).mkdir(exist_ok=True)
+    ctx.storage_state(path={session_file!r})
+    print(f"Session gespeichert.")
+    browser.close()
+    sys.exit(0)
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
+        tmp.write(script)
+        tmp_path = tmp.name
+
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, tmp_path],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, cwd=str(BASE_DIR),
+        )
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line.strip():
+                _log(line)
+        proc.wait()
+        ok = proc.returncode == 0
+    except Exception as e:
+        _log(f"Fehler: {e}")
+        ok = False
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    # Browser aufräumen
+    try:
+        info["proc"].terminate()
+    except Exception:
+        pass
+    shutil.rmtree(info.get("tmp_dir", ""), ignore_errors=True)
+    _session_browsers.pop(provider_id, None)
+
+    if ok:
+        _log("✅ Session gespeichert – automatischer Sync ist jetzt aktiv.")
+    else:
+        _log("❌ Noch nicht eingeloggt? Bitte zuerst einloggen, dann nochmal 'Session speichern' klicken.")
+
+    run_status["running"] = False
+
+
+@app.route("/api/run_provider/<provider_id>", methods=["POST"])
+def api_run_provider(provider_id):
+    if run_status["running"]:
+        return jsonify({"ok": False, "error": "Läuft bereits"})
+    providers = load_providers()
+    provider = next((p for p in providers if p["id"] == provider_id), None)
+    if not provider:
+        return jsonify({"ok": False, "error": "Anbieter nicht gefunden"})
+    headless = (request.json or {}).get("headless", True)
+    thread = threading.Thread(target=_run_provider_sync, args=(provider, headless))
+    thread.daemon = True
+    thread.start()
+    return jsonify({"ok": True})
+
+
+def _run_provider_sync(provider: dict, headless: bool = True):
+    import importlib.util, io
+    run_status["running"] = True
+    run_status["log"] = []
+
+    def _log(msg):
+        run_status["log"].append(msg)
+        with LOG_FILE.open("a") as f:
+            f.write(msg + "\n")
+
+    # stdout umleiten damit print() aus main.py ins Log kommt
+    class _Tee(io.TextIOBase):
+        def __init__(self, orig):
+            self._orig = orig
+        def write(self, s):
+            self._orig.write(s)
+            for line in s.splitlines():
+                if line.strip():
+                    _log(line)
+            return len(s)
+        def flush(self):
+            self._orig.flush()
+
+    import sys
+    old_stdout = sys.stdout
+    sys.stdout = _Tee(old_stdout)
+
+    _log(f"=== Provider-Run: {provider['name']} ({datetime.now().isoformat()}) ===")
+    try:
+        spec = importlib.util.spec_from_file_location("main", str(BASE_DIR / "main.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        files = mod.download_provider_invoices(provider, headless=headless)
+        _log(f"{len(files)} Rechnung(en) heruntergeladen.")
+        if files:
+            mod.post_to_slack(files)
+        run_status["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+        run_status["last_count"] = len(get_invoices())
+    except Exception as e:
+        import traceback
+        _log(f"Fehler: {e}")
+        _log(traceback.format_exc())
+    finally:
+        sys.stdout = old_stdout
+        run_status["running"] = False
+
+
+@app.route("/api/status")
+def api_status():
+    return jsonify({
+        "running": run_status["running"],
+        "log": run_status["log"][-50:],
+        "last_run": run_status["last_run"],
+        "last_count": run_status["last_count"],
+    })
+
+
+@app.route("/api/logs")
+def api_logs():
+    if LOG_FILE.exists():
+        lines = LOG_FILE.read_text().splitlines()[-200:]
+        return jsonify({"lines": lines})
+    return jsonify({"lines": []})
+
+
+# ── Helpers ─────────────────────────────────────────────────────────────────
+
+def _mask(val):
+    if not val or len(val) < 10:
+        return val
+    return val[:6] + "••••••" + val[-4:]
+
+
+def _set_env(key, value):
+    set_key(str(ENV_FILE), key, value)
+    os.environ[key] = value
+
+
+def _run_sync(headless=True):
+    run_status["running"] = True
+    run_status["log"] = []
+    args = ["python3", str(BASE_DIR / "main.py")]
+    if not headless:
+        args.append("--no-headless")
+
+    try:
+        proc = subprocess.Popen(
+            args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, cwd=str(BASE_DIR)
+        )
+        with LOG_FILE.open("a") as logf:
+            logf.write(f"\n=== Run {datetime.now().isoformat()} ===\n")
+            for line in proc.stdout:
+                line = line.rstrip()
+                run_status["log"].append(line)
+                logf.write(line + "\n")
+        proc.wait()
+        run_status["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+        run_status["last_count"] = len(get_invoices())
+    except Exception as e:
+        run_status["log"].append(f"Fehler: {e}")
+    finally:
+        run_status["running"] = False
+
+
+if __name__ == "__main__":
+    print("BillBridge läuft auf http://localhost:5757")
+    app.run(host="127.0.0.1", port=5757, debug=False)
