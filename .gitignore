@@ -14,10 +14,13 @@ seen_invoices.txt
 settings.json
 billbridge.log
 *.log
+moss_proposals.json
 
 # Debug-Dateien
 debug_*.html
 *.png
+# ... aber die Favicons der Web-UI gehören dazu
+!static/*.png
 
 # macOS
 .DS_Store

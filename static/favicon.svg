@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<rect width="64" height="64" rx="14" fill="#FFFFFF" stroke="#C2C5CD" stroke-width="1"></rect>
+<path transform="translate(11.77,13.56) scale(0.58)" fill="#1A1A1A" d="M58.8,0h-19.12l-1.29,18.38h-12.31L27.37,0h-10.12L0,32.39l4.05,24.3h19.12l1.46-19.68h12.31l-1.46,19.68h10.13l17.25-32.39L58.8,0Z"></path>
+<circle cx="47.5" cy="47.5" r="13.5" fill="#FFE600" stroke="#FFFFFF" stroke-width="3"></circle>
+<text x="47.5" y="48" text-anchor="middle" dominant-baseline="central" font-family="Inter, Arial, sans-serif" font-weight="800" font-size="18" fill="#1A1A1A">€</text>
+</svg>
