@@ -15,6 +15,9 @@ settings.json
 billbridge.log
 *.log
 moss_proposals.json
+moss_sent.txt
+moss_last_ts.txt
+provider_last_run.json
 
 # Debug-Dateien
 debug_*.html
