@@ -1242,6 +1242,28 @@ def _slack_client_for_history():
         yield WebClient(token=SLACK_USER_TOKEN)
 
 
+def _fmt_eur(amount: float) -> str:
+    """23.99 -> '23,99' – deutsche Schreibweise wie im restlichen Text."""
+    return f"{amount:,.2f}".replace(",", "~").replace(".", ",").replace("~", ".")
+
+
+def _proposal_message(prop: dict) -> str:
+    """Nachrichtentext eines Vorschlags.
+
+    Händler, Datum und Betrag stehen in der ERSTEN Zeile: Slack zeigt in
+    Thread-Listen und Benachrichtigungen nur den Anfang, und ein einheitliches
+    "Buchungstext nötig" vorneweg machte zwei gleich teure Positionen
+    (2x 23,99 €) praktisch unterscheidbar erst am Zeilenende.
+    """
+    return (
+        f"📝 *{prop['merchant']} · {prop['date']} · {_fmt_eur(prop['amount'])} €*\n"
+        f"Buchungstext fehlt. Vorschlag:\n"
+        f"> _{prop['text'][:300]}_\n"
+        f"→ Antworte _in diesem Thread_ mit dem Buchungstext "
+        f"(oder `ok`, um den Vorschlag zu übernehmen)."
+    )
+
+
 def _post_buchungstext_proposals(proposals: list[dict]) -> None:
     """Postet jeden Buchungstext-Vorschlag als eigene Kanal-Nachricht.
 
@@ -1280,13 +1302,7 @@ def _post_buchungstext_proposals(proposals: list[dict]) -> None:
     client = WebClient(token=SLACK_BOT_TOKEN)
     posted = 0
     for key, prop in fresh:
-        text = (
-            f"📝 *Buchungstext nötig* – *{prop['merchant']}* "
-            f"{prop['amount']:.2f} € ({prop['date']})\n"
-            f"Vorschlag: _{prop['text'][:300]}_\n"
-            f"→ Antworte _in diesem Thread_ mit dem Buchungstext "
-            f"(oder `ok`, um den Vorschlag zu übernehmen)."
-        )
+        text = _proposal_message(prop)
         try:
             resp = client.chat_postMessage(channel=SLACK_CHANNEL_ID, text=text)
         except Exception as e:
