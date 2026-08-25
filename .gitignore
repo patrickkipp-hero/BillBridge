@@ -21,6 +21,7 @@ provider_last_run.json
 
 # Debug-Dateien
 debug_*.html
+output.pdf
 *.png
 # ... aber die Favicons der Web-UI gehören dazu
 !static/*.png
