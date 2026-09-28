@@ -1031,6 +1031,14 @@ def _extract_moss_open_rows(page) -> list[dict]:
 # Abstand im Log und sind von Hand zu pflegen.
 MOSS_MATCH_WINDOW_DAYS = 3
 
+# Erlaubte Abweichung zwischen Rechnungsbetrag und Kartenbuchung, in Cent.
+# 0 = nur betragsgleiche Rechnungen. Vorher galten ±2 Cent für vermutete
+# Rundungsdifferenzen; tatsächlich führte das dazu, dass Rechnungen an
+# fremde Transaktionen gingen, die nur annähernd passten (9 Paare im
+# Bestand unterscheiden sich um 1-2 Cent). Auf Wunsch der Buchhaltung
+# (Lydia Mewes, 28.09.2026): lieber keine Zuordnung als eine falsche.
+MOSS_MATCH_CENT_TOLERANCE = 0
+
 
 def _invoice_file_date(path: Path) -> Optional[datetime]:
     """Liest das Datum aus dem Dateinamen (…_YYYY-MM-DD_…)."""
@@ -1045,23 +1053,34 @@ def _invoice_file_date(path: Path) -> Optional[datetime]:
 
 def _find_local_invoice_for_amount(amount: float, tx_date: Optional[datetime]) -> Optional[Path]:
     """Sucht eine bereits heruntergeladene Rechnung mit passendem Betrag
-    (±2 Cent Toleranz für Rundungsdifferenzen zwischen Rechnung und
-    Kartenabbuchung) UND einem Datum innerhalb von MOSS_MATCH_WINDOW_DAYS um
+    (Abweichung höchstens MOSS_MATCH_CENT_TOLERANCE Cent, standardmäßig also
+    betragsgleich) UND einem Datum innerhalb von MOSS_MATCH_WINDOW_DAYS um
     das Buchungsdatum. Bei mehreren Treffern gewinnt das nächste Datum.
     Ohne bekanntes Buchungsdatum ist das Fenster nicht prüfbar – dann
     entscheidet weiterhin allein der Betrag."""
-    candidates = []
+    # In ganzen Cent rechnen: 0.02 als Float-Vergleich ist unzuverlässig,
+    # und bei Toleranz 0 muss "gleich" auch wirklich gleich heißen.
+    ziel_cent = round(amount * 100)
+    candidates, knapp_daneben = [], []
     for p in DOWNLOAD_DIR.glob("*.pdf"):
         m = re.search(r"_([\d.]+)EUR\.pdf$", p.name)
         if not m:
             continue
         try:
-            file_amount = float(m.group(1))
+            file_cent = round(float(m.group(1)) * 100)
         except ValueError:
             continue
-        if abs(file_amount - amount) <= 0.02:
+        diff = abs(file_cent - ziel_cent)
+        if diff <= MOSS_MATCH_CENT_TOLERANCE:
             candidates.append(p)
+        elif diff <= 2:
+            knapp_daneben.append((p, diff))
     if not candidates:
+        # Sichtbar machen, warum nichts zugeordnet wurde – sonst sieht eine
+        # um 1 Cent verfehlte Rechnung wie "gar keine Rechnung da" aus.
+        for p, diff in knapp_daneben:
+            print(f"    Betrag weicht ab: {p.name} ({diff} Cent Differenz, "
+                  f"Toleranz {MOSS_MATCH_CENT_TOLERANCE}) – nicht zugeordnet.")
         return None
     if not tx_date:
         return candidates[0]
