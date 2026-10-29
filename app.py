@@ -491,8 +491,19 @@ with sync_playwright() as pw:
     except Exception as e:
         print(f"CDP-Verbindung fehlgeschlagen: {{e}}")
         sys.exit(1)
-    ctx = browser.contexts[0] if browser.contexts else browser.new_context()
-    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    # Nicht blind die erste Seite nehmen: Im Fenster können tote Tabs liegen
+    # (Frame has been detached) oder fremde Seiten (Amazon-Login, newtab).
+    # Beides hat Abgleiche stumm ins Leere laufen lassen.
+    seiten = [p for c in browser.contexts for p in c.pages if not p.is_closed()]
+    print(f"Seiten im Fenster: {{[ (p.url or '')[:60] for p in seiten ]}}")
+    page = next((p for p in seiten if "getmoss.com" in (p.url or "")), None)
+    if page is None:
+        page = seiten[0] if seiten else (
+            browser.contexts[0] if browser.contexts else browser.new_context()).new_page()
+        print("Keine Moss-Seite im Fenster – öffne sie.")
+        page.goto("https://getmoss.com/app/transactions/all",
+                  wait_until="domcontentloaded", timeout=30_000)
+        time.sleep(3)
     {nav_snippet}
     if {logged_out_check}:
         print("Noch nicht eingeloggt!")
@@ -602,8 +613,19 @@ with sync_playwright() as pw:
     except Exception as e:
         print(f"CDP-Verbindung fehlgeschlagen: {{e}}")
         sys.exit(1)
-    ctx = browser.contexts[0] if browser.contexts else browser.new_context()
-    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    # Nicht blind die erste Seite nehmen: Im Fenster können tote Tabs liegen
+    # (Frame has been detached) oder fremde Seiten (Amazon-Login, newtab).
+    # Beides hat Abgleiche stumm ins Leere laufen lassen.
+    seiten = [p for c in browser.contexts for p in c.pages if not p.is_closed()]
+    print(f"Seiten im Fenster: {{[ (p.url or '')[:60] for p in seiten ]}}")
+    page = next((p for p in seiten if "getmoss.com" in (p.url or "")), None)
+    if page is None:
+        page = seiten[0] if seiten else (
+            browser.contexts[0] if browser.contexts else browser.new_context()).new_page()
+        print("Keine Moss-Seite im Fenster – öffne sie.")
+        page.goto("https://getmoss.com/app/transactions/all",
+                  wait_until="domcontentloaded", timeout=30_000)
+        time.sleep(3)
     print(f"Aktuelle Seite: {{page.url}}")
     if {logged_out_check}:
         print("Noch nicht eingeloggt!")
@@ -995,7 +1017,7 @@ def _moss_apply_buchungstexte():
 
     info = _session_browsers["moss"]
     script = f"""
-import sys
+import sys, time
 sys.path.insert(0, {str(BASE_DIR)!r})
 from playwright.sync_api import sync_playwright
 import main as billbridge_main
@@ -1005,8 +1027,19 @@ with sync_playwright() as pw:
     except Exception as e:
         print(f"CDP-Verbindung fehlgeschlagen: {{e}}")
         sys.exit(1)
-    ctx = browser.contexts[0] if browser.contexts else browser.new_context()
-    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    # Nicht blind die erste Seite nehmen: Im Fenster können tote Tabs liegen
+    # (Frame has been detached) oder fremde Seiten (Amazon-Login, newtab).
+    # Beides hat Abgleiche stumm ins Leere laufen lassen.
+    seiten = [p for c in browser.contexts for p in c.pages if not p.is_closed()]
+    print(f"Seiten im Fenster: {{[ (p.url or '')[:60] for p in seiten ]}}")
+    page = next((p for p in seiten if "getmoss.com" in (p.url or "")), None)
+    if page is None:
+        page = seiten[0] if seiten else (
+            browser.contexts[0] if browser.contexts else browser.new_context()).new_page()
+        print("Keine Moss-Seite im Fenster – öffne sie.")
+        page.goto("https://getmoss.com/app/transactions/all",
+                  wait_until="domcontentloaded", timeout=30_000)
+        time.sleep(3)
     if "getmoss.com" not in page.url or "signin" in page.url:
         print(f"Moss nicht eingeloggt (Seite: {{page.url}}) - vertagt.")
         browser.close()
