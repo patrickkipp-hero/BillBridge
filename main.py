@@ -1145,15 +1145,50 @@ def _save_moss_proposals(store: dict) -> None:
     MOSS_PROPOSALS_FILE.write_text(json.dumps(store, indent=2, ensure_ascii=False))
 
 
+def _open_moss_row(page, row_id: str, warte_auf: str) -> bool:
+    """Öffnet eine Transaktionszeile und meldet, ob das Detailfeld aufging.
+
+    Der direkte Klick scheitert reproduzierbar daran, dass eine schwebende
+    Leiste von Moss über der Zeile liegt ("intercepts pointer events"):
+    Playwright bricht dann nach 10s ab. Deshalb erst mittig scrollen, dann
+    normal klicken und zuletzt den Klick direkt im DOM auslösen, was jede
+    Überlagerung umgeht.
+    """
+    zeile = page.locator(f'[row-id="{row_id}"]').first
+    try:
+        zeile.scroll_into_view_if_needed(timeout=8_000)
+    except Exception:
+        pass
+    try:
+        zeile.click(timeout=4_000)
+    except Exception:
+        try:
+            page.eval_on_selector(f'[row-id="{row_id}"]', "el => el.click()")
+        except Exception as e:
+            print(f"    Zeile {row_id[:8]} nicht anklickbar: {e}")
+            return False
+    # Genau auf die Steuerung warten, die der Aufrufer braucht. Vorher galt
+    # das Feld schon als offen, wenn IRGENDEINE der beiden da war – dann lief
+    # der Upload in einen Timeout, obwohl "offen" gemeldet wurde.
+    try:
+        page.locator(warte_auf).first.wait_for(state="attached", timeout=8_000)
+        return True
+    except Exception:
+        vorhanden = page.locator(warte_auf).count()
+        print(f"    Detailfeld für Zeile {row_id[:8]} ohne erwartete Steuerung "
+              f"({warte_auf}, {vorhanden} Treffer) – übersprungen.")
+        return False
+
+
 def _process_moss_transaction(page, row_id: str, pdf_path: Path, buchungstext: str) -> bool:
     """Öffnet die Transaktionszeile, lädt die Rechnung als Beleg hoch und
     trägt den Buchungstext ein (beides speichert automatisch)."""
     try:
-        row = page.locator(f'[row-id="{row_id}"]').first
-        row.click(timeout=10_000)
+        upload_sel = '[data-file-upload-root="true"] input[type="file"]'
+        if not _open_moss_row(page, row_id, upload_sel):
+            return False
 
-        file_input = page.locator('[data-file-upload-root="true"] input[type="file"]')
-        file_input.wait_for(state="attached", timeout=10_000)
+        file_input = page.locator(upload_sel)
         file_input.set_input_files(str(pdf_path.resolve()))
         time.sleep(4)
 
@@ -1172,6 +1207,12 @@ def _process_moss_transaction(page, row_id: str, pdf_path: Path, buchungstext: s
         return True
     except Exception as e:
         print(f"    Fehler beim Bearbeiten der Transaktion: {e}")
+        # Offen gebliebenes Detailfeld würde jede weitere Zeile blockieren.
+        try:
+            page.keyboard.press("Escape")
+            time.sleep(1)
+        except Exception:
+            pass
         return False
 
 
@@ -1180,9 +1221,10 @@ def _fill_buchungstext_only(page, row_id: str, buchungstext: str) -> str:
     aber ausschließlich, wenn das Feld noch leer ist (kein Überschreiben).
     Gibt "filled", "skip" (war schon gefüllt) oder "error" zurück."""
     try:
-        row = page.locator(f'[row-id="{row_id}"]').first
-        row.click(timeout=10_000)
-        textarea = page.locator(f'textarea[placeholder="{_MOSS_BUCHUNGSTEXT_PLACEHOLDER}"]')
+        text_sel = f'textarea[placeholder="{_MOSS_BUCHUNGSTEXT_PLACEHOLDER}"]'
+        if not _open_moss_row(page, row_id, text_sel):
+            return "error"
+        textarea = page.locator(text_sel)
         textarea.wait_for(state="visible", timeout=10_000)
         if textarea.input_value().strip():
             result = "skip"
