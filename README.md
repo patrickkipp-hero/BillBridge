@@ -21,6 +21,32 @@ Rechnungen automatisch von Amazon Business und Galaxus herunterladen und per Sla
 
 ## Setup
 
+### Schnellweg: `./setup.sh`
+
+Für eine **eigene Installation pro Person** – jede mit eigenen Zugangsdaten,
+eigenem Rechnungsordner und eigenem Slack-Kanal. Es läuft nichts zusammen.
+
+```bash
+./setup.sh
+```
+
+Das Skript wählt den passenden Python-Interpreter (auf dem PATH kann ein
+Python liegen, das die Abhängigkeiten nicht hat), installiert Pakete und
+Browser, fragt die Zugangsdaten ab und schreibt sie mit Rechten 600 in die
+lokale `.env`, richtet auf Wunsch den LaunchAgent ein und nennt am Ende die
+Schritte, die von Hand bleiben: Amazon-Login, Moss-Login und die Prüfung,
+dass BillBridge Mitglied deines Slack-Kanals ist.
+
+Eine vorhandene `.env` wird nie ohne Rückfrage überschrieben; vor dem
+Ersetzen legt das Skript eine Sicherung an.
+
+**Zur Abgrenzung:** Der Server lauscht ausschließlich auf `127.0.0.1` und ist
+aus dem Netz nicht erreichbar. Die Sicherheitsgrenze ist dein
+Mac-Benutzerkonto, nicht ein Passwortfeld in der Oberfläche.
+
+### Von Hand
+
+
 ### 1. Repository klonen
 
 ```bash
