@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BillBridge</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180x180.png">
 <style>
   /* ── Reset & Base ── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -548,7 +552,7 @@ async function renderDashboard() {
         ${data.running
           ? '🔄 BillBridge läuft gerade – neue Rechnungen werden geholt…'
           : data.last_run
-            ? `Letzter Lauf: ${data.last_run} · ${data.last_count} Rechnung(en) verarbeitet`
+            ? `Letzter Lauf: ${data.last_run} · ${data.last_new_count > 0 ? data.last_new_count + ' neue Rechnung(en)' : 'keine neuen Rechnungen'} · ${data.last_count} insgesamt`
             : 'Noch kein Lauf gestartet. Klick auf <a href="#" onclick="triggerRun(false);return false;">Jetzt synchronisieren</a>.'
         }
       </div>
@@ -701,9 +705,9 @@ async function renderProviders() {
   ]);
   const main = document.getElementById('mainContent');
 
-  // Lade Session-Status für alle custom Provider parallel
+  // Lade Session-Status für alle Provider (inkl. Amazon)
   const sessionStatuses = {};
-  await Promise.all(providers.filter(p => p.custom).map(async p => {
+  await Promise.all(providers.map(async p => {
     const s = await fetchJSON('/api/session_status/' + p.id);
     sessionStatuses[p.id] = s;
   }));
@@ -713,20 +717,42 @@ async function renderProviders() {
     const bg = p.color + '20';
     const count = p.id === 'amazon' ? invoices.length : 0;
     const isAmazon = p.id === 'amazon';
-    const hasCredentials = isAmazon || (p.email && p.password);
-    const hasSession = isAmazon || sessionStatuses[p.id]?.has_session;
-    const browserOpen = !isAmazon && sessionStatuses[p.id]?.browser_open;
+    const isGmail = p.id === 'gmail';
+    const isBuiltin = isAmazon || isGmail;
+    // Passwort ist optional: der Login läuft interaktiv über "Session einrichten"
+    // (auch für SSO-Provider ohne eigenes Passwort, z.B. Google-SSO bei Moss).
+    const hasCredentials = isBuiltin || !!p.email;
+    const hasSession = isGmail || sessionStatuses[p.id]?.has_session;
+    const browserOpen = sessionStatuses[p.id]?.browser_open;
+    const isMoss = p.id === 'moss';
 
     let statusClass, dotClass, statusLabel, actionBtns;
-    if (isAmazon) {
-      statusClass = 'active'; dotClass = 'green'; statusLabel = 'Aktiv';
+    if (isGmail) {
+      if (p.configured) {
+        statusClass = 'active'; dotClass = 'green'; statusLabel = 'Aktiv';
+        actionBtns = `<button class="btn btn-ghost" onclick="runGmail()" style="color:var(--accent);font-weight:600">▶ Ausführen</button>`;
+      } else {
+        statusClass = 'warning'; dotClass = 'yellow'; statusLabel = 'Nicht konfiguriert';
+        actionBtns = '';
+      }
+    } else if (browserOpen && isMoss) {
+      // Moss-Sessions lassen sich nicht headless wiederverwenden: der Abgleich
+      // läuft direkt im offenen, eingeloggten Login-Fenster statt später.
+      statusClass = 'warning'; dotClass = 'yellow'; statusLabel = 'Eingeloggt – bereit zum Abgleich';
+      actionBtns = `<button class="btn btn-primary" onclick="mossReconcile()" style="font-size:12px">🔄 Offene Rechnungen abgleichen</button>`;
+    } else if (browserOpen) {
+      statusClass = 'warning'; dotClass = 'yellow'; statusLabel = 'Warte auf Login…';
+      actionBtns = `<button class="btn btn-primary" onclick="saveSession('${p.id}')" style="font-size:12px">💾 Session speichern</button>`;
+    } else if (isMoss) {
+      statusClass = 'active'; dotClass = 'green'; statusLabel = 'Bereit (manueller Abgleich)';
+      actionBtns = `<button class="btn btn-ghost" onclick="setupSession('${p.id}')" style="color:var(--accent);font-weight:600">🔑 Abgleich starten</button>`;
+    } else if (isAmazon) {
+      const amazonHasSession = sessionStatuses['amazon']?.has_session;
+      statusClass = 'active'; dotClass = 'green'; statusLabel = amazonHasSession ? 'Aktiv (Session)' : 'Aktiv';
       actionBtns = `<button class="btn btn-ghost" onclick="triggerRun()" style="color:var(--accent);font-weight:600">▶ Ausführen</button>`;
     } else if (!hasCredentials) {
       statusClass = 'warning'; dotClass = 'yellow'; statusLabel = 'Keine Zugangsdaten';
       actionBtns = '';
-    } else if (browserOpen) {
-      statusClass = 'warning'; dotClass = 'yellow'; statusLabel = 'Warte auf Login…';
-      actionBtns = `<button class="btn btn-primary" onclick="saveSession('${p.id}')" style="font-size:12px">💾 Session speichern</button>`;
     } else if (!hasSession) {
       statusClass = 'warning'; dotClass = 'yellow'; statusLabel = 'Session fehlt';
       actionBtns = `<button class="btn btn-primary" onclick="setupSession('${p.id}')" style="font-size:12px">🔑 Session einrichten</button>`;
@@ -740,7 +766,7 @@ async function renderProviders() {
         <div class="provider-badge" style="background:${bg};color:${p.color}">${abbr}</div>
         <div class="provider-info">
           <h3>${p.name}</h3>
-          <p>${p.email || (isAmazon ? amazon.email : '–') || 'Keine E-Mail'} · ${count} Rechnungen</p>
+          <p>${isGmail ? (p.email || 'Nicht konfiguriert') + ' · Label: ' + (p.label || 'Orders') : p.email || (isAmazon ? amazon.email : '–') || 'Keine E-Mail'} · ${count} Rechnungen</p>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <span class="status-pill ${statusClass}">
@@ -748,8 +774,8 @@ async function renderProviders() {
             ${statusLabel}
           </span>
           ${actionBtns}
-          ${p.custom ? `<button class="btn btn-ghost" onclick="setupSession('${p.id}')" title="Session einrichten / erneuern" style="font-size:13px">🔑</button>` : ''}
-          <button class="btn btn-ghost" onclick="openEditProvider('${p.id}')">Bearbeiten</button>
+          ${((p.custom && hasSession && !isMoss) || isAmazon) && !browserOpen ? `<button class="btn btn-ghost" onclick="setupSession('${p.id}')" title="Session einrichten / erneuern" style="font-size:13px">🔑</button>` : ''}
+          ${isGmail ? `<button class="btn btn-ghost" onclick="openGmailSettings()">Bearbeiten</button>` : `<button class="btn btn-ghost" onclick="openEditProvider('${p.id}')">Bearbeiten</button>`}
           ${p.custom ? `<button class="btn btn-ghost" style="color:var(--red)" onclick="deleteProvider('${p.id}')">✕</button>` : ''}
         </div>
       </div>
@@ -1231,6 +1257,86 @@ async function saveSession(providerId) {
   }
 }
 
+async function mossReconcile() {
+  const resp = await fetch('/api/moss_reconcile', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+  });
+  const data = await resp.json();
+  if (data.ok) {
+    showToast('⏳ Moss-Abgleich läuft…');
+    const poller = setInterval(async () => {
+      const s = await fetchJSON('/api/status');
+      if (!s.running) {
+        clearInterval(poller);
+        const last = s.log[s.log.length - 1] || '';
+        if (last.includes('✅')) {
+          showToast('✅ Moss-Abgleich abgeschlossen!', 'success');
+        } else {
+          showToast('⚠ ' + last);
+        }
+        renderProviders();
+      }
+    }, 1500);
+  } else {
+    showToast('⚠ ' + (data.error || 'Fehler'));
+  }
+}
+
+async function runGmail() {
+  const resp = await fetch('/api/run_gmail', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+  const data = await resp.json();
+  if (data.ok) {
+    showToast('📬 Gmail wird abgerufen…');
+    const poller = setInterval(async () => {
+      const s = await fetchJSON('/api/status');
+      if (!s.running) {
+        clearInterval(poller);
+        const last = s.log[s.log.length - 1] || '';
+        showToast(last.includes('Fehler') ? '⚠ ' + last : '✅ Gmail-Abruf abgeschlossen');
+        renderProviders();
+      }
+    }, 2000);
+  } else {
+    showToast('⚠ ' + (data.error || 'Fehler'));
+  }
+}
+
+async function openGmailSettings() {
+  const g = await fetchJSON('/api/gmail');
+  const modal = document.getElementById('modal');
+  modal.innerHTML = `
+    <div class="modal-box" style="max-width:480px">
+      <h2 style="margin-bottom:18px">Gmail konfigurieren</h2>
+      <label class="field-label">Gmail-Adresse</label>
+      <input class="input" id="gEmail" value="${g.email || ''}" placeholder="deine@gmail.com" style="margin-bottom:12px">
+      <label class="field-label">App-Passwort</label>
+      <input class="input" id="gPwd" type="password" placeholder="${g.app_password_set ? '(gesetzt)' : 'xxxx xxxx xxxx xxxx'}" style="margin-bottom:12px">
+      <label class="field-label">Label / Ordner</label>
+      <input class="input" id="gLabel" value="${g.label || 'Orders'}" style="margin-bottom:6px">
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:20px">
+        App-Passwort unter <b>myaccount.google.com → Sicherheit → App-Passwörter</b> erstellen (2FA muss aktiv sein).
+      </p>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
+        <button class="btn btn-primary" onclick="saveGmailSettings()">Speichern</button>
+      </div>
+    </div>`;
+  modal.style.display = 'flex';
+}
+
+async function saveGmailSettings() {
+  const body = {
+    email: document.getElementById('gEmail').value,
+    label: document.getElementById('gLabel').value,
+  };
+  const pwd = document.getElementById('gPwd').value;
+  if (pwd) body.app_password = pwd;
+  await fetch('/api/gmail', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  closeModal();
+  showToast('✅ Gmail-Einstellungen gespeichert');
+  renderProviders();
+}
+
 async function runProvider(providerId, headless = false) {
   const resp = await fetch('/api/run_provider/' + providerId, {
     method: 'POST',
@@ -1270,7 +1376,7 @@ function startPolling() {
     if (!s.running) {
       clearInterval(runPoller);
       runPoller = null;
-      showToast(`✅ Sync abgeschlossen · ${s.last_count} Rechnung(en)`, 'success');
+      showToast(`✅ Sync abgeschlossen · ${s.last_new_count > 0 ? s.last_new_count + ' neue Rechnung(en)' : 'keine neuen Rechnungen'}`, 'success');
       renderPage(currentPage);
     } else if (currentPage === 'logs') {
       renderLogs();
