@@ -954,6 +954,34 @@ _MOSS_ROW_JS = """
 }
 """
 
+_MOSS_SCROLL_JS = """
+(schrittweite) => {
+    // ag-Grid hält nur die sichtbaren Zeilen im DOM. Gescrollt wird der
+    // Viewport des Grids, nicht das Fenster.
+    const vp = document.querySelector('.ag-body-viewport')
+        || Array.from(document.querySelectorAll('div')).find(
+               e => e.scrollHeight > e.clientHeight + 40 && e.querySelector('[row-id]'));
+    if (!vp) return {ok: false, bewegt: false, oben: 0, rest: 0};
+    const vorher = vp.scrollTop;
+    vp.scrollTop = vorher + (schrittweite || vp.clientHeight * 0.8);
+    return {ok: true, bewegt: vp.scrollTop > vorher + 1,
+            oben: vp.scrollTop, rest: vp.scrollHeight - vp.clientHeight - vp.scrollTop};
+}
+"""
+
+_MOSS_SCROLL_TOP_JS = """
+() => {
+    const vp = document.querySelector('.ag-body-viewport')
+        || Array.from(document.querySelectorAll('div')).find(
+               e => e.scrollHeight > e.clientHeight + 40 && e.querySelector('[row-id]'));
+    if (vp) vp.scrollTop = 0;
+}
+"""
+
+# Sicherheitsnetz gegen endloses Scrollen bei unerwartetem Seitenaufbau.
+MOSS_MAX_SCROLLS = 60
+
+
 _MOSS_BUCHUNGSTEXT_PLACEHOLDER = "Gib zusätzliche Informationen zu dieser Ausgabe an"
 
 _GERMAN_MONTHS_SHORT = {
@@ -996,10 +1024,46 @@ def _parse_moss_amount(text: str) -> Optional[float]:
 
 
 def _extract_moss_open_rows(page) -> list[dict]:
-    """Extrahiert alle Zeilen der aktuell geladenen 'Fehlende Belege'-Ansicht."""
-    raw_rows = page.evaluate(_MOSS_ROW_JS)
+    """Extrahiert ALLE Zeilen der geladenen Ansicht, auch die noch nicht
+    sichtbaren.
+
+    Die Tabelle ist virtualisiert: ohne Scrollen liefert sie nur den gerade
+    gerenderten Ausschnitt, und der hing von der Scrollposition des letzten
+    Durchgangs ab – im selben Bestand wurden so einmal 37 und einmal 9 offene
+    Posten gefunden. Deshalb wird durchgescrollt und nach row-id gesammelt,
+    bis nichts Neues mehr dazukommt.
+    """
+    gesehen: dict[str, dict] = {}
+    runden_ohne_neues = 0
+    for runde in range(MOSS_MAX_SCROLLS):
+        vorher = len(gesehen)
+        for raw in page.evaluate(_MOSS_ROW_JS):
+            rid = raw.get("rowId")
+            if rid and rid not in gesehen:
+                gesehen[rid] = raw
+        stand = page.evaluate(_MOSS_SCROLL_JS, None)
+        if not stand.get("ok"):
+            break  # kein scrollbarer Bereich – Ansicht passt auf einen Schirm
+        if len(gesehen) == vorher:
+            runden_ohne_neues += 1
+            # Zwei Durchgänge ohne neue Zeile: einmal kann Nachladen hinterherhinken.
+            if runden_ohne_neues >= 2 and not stand.get("bewegt"):
+                break
+        else:
+            runden_ohne_neues = 0
+        if not stand.get("bewegt") and runden_ohne_neues >= 2:
+            break
+        time.sleep(0.45)
+    try:
+        page.evaluate(_MOSS_SCROLL_TOP_JS)
+        time.sleep(0.4)
+    except Exception:
+        pass
+    if len(gesehen) > 0:
+        print(f"  ({len(gesehen)} Zeile(n) nach Durchscrollen erfasst)")
+
     rows = []
-    for raw in raw_rows:
+    for raw in gesehen.values():
         merchant_raw = raw.get("merchantSortName", "").strip()
         # Moss hängt diesen Hinweis an die Händlerspalte genau der Zeilen, denen
         # Pflichtangaben (u.a. der Buchungstext) fehlen. Früher wurde er nur
@@ -1025,11 +1089,15 @@ def _extract_moss_open_rows(page) -> list[dict]:
 # Wie weit Rechnungsdatum und Moss-Buchungsdatum auseinanderliegen dürfen.
 # Ohne diese Grenze genügte Betragsgleichheit: eine 23,99-€-Rechnung vom 17.08.
 # wurde einer eigenständigen 23,99-€-Buchung vom 24.08. zugeordnet (7 Tage).
-# 3 Tage, weil 9 von 10 nachgemessenen korrekten Zuordnungen 0–1 Tag
-# auseinanderlagen. Preis dieser Enge: Rechnungen, die Amazon erst beim Versand
-# ausstellt, können herausfallen (beobachtet: 15 Tage) – die stehen dann mit
-# Abstand im Log und sind von Hand zu pflegen.
-MOSS_MATCH_WINDOW_DAYS = 3
+# 14 Tage. Zuerst standen hier 3, abgeleitet aus 10 nachgemessenen
+# Zuordnungen, die fast alle taggleich waren – diese Stichprobe war nicht
+# repräsentativ. Im Betrieb datiert Moss auf den Abbuchungstag, nicht auf das
+# Rechnungsdatum: beobachtete Abstände waren 7, 8, 35, 42 und 147 Tage, und
+# mit 3 Tagen wurde praktisch nichts mehr zugeordnet. 14 Tage fangen den
+# üblichen Versatz zwischen Rechnung und Kartenabbuchung ab; gegen die
+# Fehlzuordnungen, die die Buchhaltung gemeldet hat, wirkt ohnehin
+# MOSS_MATCH_CENT_TOLERANCE und nicht dieses Fenster.
+MOSS_MATCH_WINDOW_DAYS = 14
 
 # Erlaubte Abweichung zwischen Rechnungsbetrag und Kartenbuchung, in Cent.
 # 0 = nur betragsgleiche Rechnungen. Vorher galten ±2 Cent für vermutete
@@ -1155,6 +1223,22 @@ def _open_moss_row(page, row_id: str, warte_auf: str) -> bool:
     Überlagerung umgeht.
     """
     zeile = page.locator(f'[row-id="{row_id}"]').first
+    # Nach dem Durchscrollen kann die Zeile aus dem DOM gefallen sein
+    # (Virtualisierung). Dann erst wieder hinscrollen, bis sie auftaucht.
+    if zeile.count() == 0:
+        page.evaluate(_MOSS_SCROLL_TOP_JS)
+        time.sleep(0.3)
+        for _ in range(MOSS_MAX_SCROLLS):
+            if page.locator(f'[row-id="{row_id}"]').count() > 0:
+                break
+            stand = page.evaluate(_MOSS_SCROLL_JS, None)
+            if not stand.get("ok") or not stand.get("bewegt"):
+                break
+            time.sleep(0.35)
+        zeile = page.locator(f'[row-id="{row_id}"]').first
+        if zeile.count() == 0:
+            print(f"    Zeile {row_id[:8]} nicht mehr in der Tabelle – übersprungen.")
+            return False
     try:
         zeile.scroll_into_view_if_needed(timeout=8_000)
     except Exception:
