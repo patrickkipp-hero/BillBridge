@@ -1119,6 +1119,18 @@ def _invoice_file_date(path: Path) -> Optional[datetime]:
         return None
 
 
+def _beleg_fehlt(row: dict) -> bool:
+    """Ob die Transaktion laut Spalte 'Beleg' wirklich noch keinen hat.
+
+    Nötig, weil die Ansicht trotz receiptAggregatedStatuses=RECEIPT_MISSING
+    auch Zeilen mit 'Hinzugefügt' und 'Ungültig' liefert (gemessen: 25/22/1
+    von 48). Für die übrigen rendert Moss keinen Upload-Bereich – exportierte
+    Transaktionen sind sogar gesperrt –, der Upload lief also zwangsläufig in
+    einen Timeout.
+    """
+    return (row.get("receipt_status") or "").strip().lower().startswith("fehlt")
+
+
 def _find_local_invoice_for_amount(amount: float, tx_date: Optional[datetime]) -> Optional[Path]:
     """Sucht eine bereits heruntergeladene Rechnung mit passendem Betrag
     (Abweichung höchstens MOSS_MATCH_CENT_TOLERANCE Cent, standardmäßig also
@@ -1213,6 +1225,27 @@ def _save_moss_proposals(store: dict) -> None:
     MOSS_PROPOSALS_FILE.write_text(json.dumps(store, indent=2, ensure_ascii=False))
 
 
+def _moss_detail_schliessen(page) -> None:
+    """Schließt ein offenes Detailfeld, falls eines steht.
+
+    Bleibt es offen, liegt es über der Tabelle und fängt den Klick auf die
+    nächste Zeile ab – dann scheitern alle Folgezeilen identisch, obwohl mit
+    ihnen nichts ist.
+    """
+    try:
+        if page.locator('[role="dialog"]').count() == 0:
+            return
+        page.keyboard.press("Escape")
+        time.sleep(0.6)
+        if page.locator('[role="dialog"]').count() > 0:
+            schliessen = page.get_by_role("button", name="Schließen")
+            if schliessen.count():
+                schliessen.first.click(timeout=3_000)
+                time.sleep(0.5)
+    except Exception:
+        pass
+
+
 def _open_moss_row(page, row_id: str, warte_auf: str) -> bool:
     """Öffnet eine Transaktionszeile und meldet, ob das Detailfeld aufging.
 
@@ -1222,6 +1255,7 @@ def _open_moss_row(page, row_id: str, warte_auf: str) -> bool:
     normal klicken und zuletzt den Klick direkt im DOM auslösen, was jede
     Überlagerung umgeht.
     """
+    _moss_detail_schliessen(page)
     zeile = page.locator(f'[row-id="{row_id}"]').first
     # Nach dem Durchscrollen kann die Zeile aus dem DOM gefallen sein
     # (Virtualisierung). Dann erst wieder hinscrollen, bis sie auftaucht.
@@ -1261,6 +1295,8 @@ def _open_moss_row(page, row_id: str, warte_auf: str) -> bool:
         vorhanden = page.locator(warte_auf).count()
         print(f"    Detailfeld für Zeile {row_id[:8]} ohne erwartete Steuerung "
               f"({warte_auf}, {vorhanden} Treffer) – übersprungen.")
+        # Offen gebliebenes Feld blockiert sonst jede folgende Zeile.
+        _moss_detail_schliessen(page)
         return False
 
 
@@ -1637,8 +1673,19 @@ def sync_moss_open_invoices(page) -> dict:
     page.goto(url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(4)
 
-    rows = _extract_moss_open_rows(page)
-    print(f"Moss: {len(rows)} offene(r) Beleg(e) gefunden.")
+    alle_zeilen = _extract_moss_open_rows(page)
+    mit_status = [r for r in alle_zeilen if (r.get("receipt_status") or "").strip()]
+    if not mit_status:
+        # Spalte unlesbar (Moss umbenannt?) – lieber alles prüfen als stumm
+        # nichts tun; die Fehlversuche stehen dann im Log.
+        print(f"Moss: {len(alle_zeilen)} Zeile(n); Spalte 'Beleg' nicht lesbar, "
+              f"es werden alle geprüft.")
+        rows = alle_zeilen
+    else:
+        rows = [r for r in alle_zeilen if _beleg_fehlt(r)]
+        uebergangen = len(alle_zeilen) - len(rows)
+        print(f"Moss: {len(rows)} Transaktion(en) ohne Beleg "
+              f"({uebergangen} mit vorhandenem oder ungültigem Beleg übergangen).")
 
     already_done = _load_moss_sent()
     done, already, unmatched = [], [], []
