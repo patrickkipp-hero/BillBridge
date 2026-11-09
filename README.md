@@ -154,11 +154,14 @@ gerade offen sind, steht in `alerts_sent.json`.
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest tests/ -q
+python3 -m pytest tests/ -q
 ```
 
 Die Tests decken die Stellen ab, an denen falsche Daten nach Moss gelangen
-könnten, und brauchen weder Browser noch Netz:
+könnten. Sie brauchen weder Browser noch Netz noch `slack_sdk` und laufen
+deshalb auch mit einem Python, das die Abhängigkeiten nicht hat – anders als
+`app.py` und `main.py` selbst, die denselben Interpreter brauchen, den auch
+`setup.sh` wählt (in der Regel `/usr/bin/python3`):
 
 | Datei | Was festgeschrieben ist |
 |---|---|
