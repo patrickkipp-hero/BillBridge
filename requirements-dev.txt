@@ -1,1 +1,5 @@
+# Nur zum Testen. Die Tests brauchen weder Browser noch Netz noch slack_sdk
+# (tests/conftest.py schiebt dafür notfalls einen Platzhalter unter);
+# python-dotenv steht hier, weil main.py es beim Import lädt.
 pytest>=8.0.0
+python-dotenv>=1.0.0

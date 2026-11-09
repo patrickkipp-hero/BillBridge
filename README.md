@@ -2,7 +2,7 @@
 
 Rechnungen automatisch von Amazon Business und Galaxus herunterladen und per Slack weiterleiten – mit lokaler Web-UI zur Verwaltung.
 
-![Flask](https://img.shields.io/badge/Flask-Web--UI-blue) ![Playwright](https://img.shields.io/badge/Playwright-Automatisierung-green) ![Slack](https://img.shields.io/badge/Slack-Integration-purple)
+[![Tests](https://github.com/patrickkipp-hero/BillBridge/actions/workflows/tests.yml/badge.svg)](https://github.com/patrickkipp-hero/BillBridge/actions/workflows/tests.yml) ![Flask](https://img.shields.io/badge/Flask-Web--UI-blue) ![Playwright](https://img.shields.io/badge/Playwright-Automatisierung-green) ![Slack](https://img.shields.io/badge/Slack-Integration-purple)
 
 ## Features
 
@@ -157,6 +157,12 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -q
 ```
 
+Bei jedem Push und jedem Pull Request laufen sie zusätzlich als GitHub Action
+(`.github/workflows/tests.yml`), auf Python 3.9 und 3.13. Dort werden
+**nur** die Test-Abhängigkeiten installiert – schleicht sich eine Abhängigkeit
+auf Playwright, pdfplumber, Slack oder das Netz ein, fällt das in der CI auf
+und nicht erst auf dem Rechner einer Kollegin.
+
 Die Tests decken die Stellen ab, an denen falsche Daten nach Moss gelangen
 könnten. Sie brauchen weder Browser noch Netz noch `slack_sdk` und laufen
 deshalb auch mit einem Python, das die Abhängigkeiten nicht hat – anders als
@@ -179,6 +185,7 @@ BillBridge/
 ├── templates/index.html    # Single-Page-App
 ├── static/                 # CSS/Assets
 ├── tests/                  # pytest, ohne Browser und Netz lauffähig
+├── .github/workflows/      # CI: pytest auf 3.9 und 3.13
 ├── .env.example            # Konfigurationsvorlage
 ├── providers.example.json  # Vorlage für Custom-Provider
 └── requirements.txt
