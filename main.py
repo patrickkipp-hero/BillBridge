@@ -1659,7 +1659,11 @@ def _clean_reply_text(msg: dict) -> str:
     # Slack liefert &, < und > maskiert zurück: aus "P&C" wird "P&amp;C".
     # Ohne das Auflösen stünde die Maskierung wörtlich in Moss.
     text = html.unescape(text)
-    lines = [re.sub(r"^\s*[•\-\*\u2022\d]+[.)]?\s*", "", ln).strip()
+    # Aufzählungszeichen am Zeilenanfang entfernen – aber nur echte: Eine
+    # Ziffer zählt nur mit folgendem Punkt oder Klammer als Listenmarke.
+    # Sonst wird aus der Mengenangabe "2 Monitore für Berlin" in Moss
+    # "Monitore für Berlin" und aus "3x Dock" wird "x Dock".
+    lines = [re.sub(r"^\s*(?:[•\u2022]\s*|[-–]\s+|\d{1,2}[.)]\s+)", "", ln).strip()
              for ln in text.splitlines()]
     return "; ".join(ln for ln in lines if ln).strip()
 
