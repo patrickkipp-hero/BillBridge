@@ -1518,6 +1518,9 @@ def _clean_reply_text(msg: dict) -> str:
     text = re.sub(r"<@[^>]+>", "", text)
     text = re.sub(r"<(https?://[^|>]+)(\|[^>]*)?>", r"\1", text)
     text = text.replace("`", "").replace("*", "").replace("_", "")
+    # Slack liefert &, < und > maskiert zurück: aus "P&C" wird "P&amp;C".
+    # Ohne das Auflösen stünde die Maskierung wörtlich in Moss.
+    text = html.unescape(text)
     lines = [re.sub(r"^\s*[•\-\*\u2022\d]+[.)]?\s*", "", ln).strip()
              for ln in text.splitlines()]
     return "; ".join(ln for ln in lines if ln).strip()
