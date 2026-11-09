@@ -1234,8 +1234,6 @@ def _extract_moss_open_rows(page) -> list[dict]:
         time.sleep(0.4)
     except Exception:
         pass
-    if len(gesehen) > 0:
-        print(f"  ({len(gesehen)} Zeile(n) nach Durchscrollen erfasst)")
 
     rows = []
     for raw in gesehen.values():
@@ -1524,6 +1522,133 @@ def _retire_proposal(client, ts: str, rec: dict, grund: str,
         print(f"    Hinweis im Thread fehlgeschlagen: {e}")
 
 
+# ── Moss-Tabelle: blättern statt scrollen ───────────────────────────────────
+# Moss liefert die Transaktionen seitenweise. Gemessen am 09.11.2026:
+# "1-50 von 324 Transaktionen", aria-rowcount 51, und der Tabellenbereich ist
+# gar nicht scrollbar (scrollHeight == clientHeight). BillBridge sah deshalb
+# immer nur die ersten 50 von 324 Transaktionen – jedes "nicht in der Liste"
+# und jedes "kein lokaler Beleg" galt in Wahrheit nur für die erste Seite.
+# Das Durchscrollen der virtualisierten Tabelle bleibt als Rückfalllösung
+# stehen (es schadet nicht), die Arbeit macht aber das Blättern.
+MOSS_PAGE_SIZE = 100          # Moss bietet 25, 50, 100
+MOSS_MAX_PAGES = 20           # Sicherheitsnetz gegen eine endlose Blätterschleife
+
+
+def _moss_seitengroesse_setzen(page, groesse: int = MOSS_PAGE_SIZE) -> bool:
+    """Stellt die Tabelle auf die größte Seitengröße, um weniger blättern zu
+    müssen. Scheitert das, wird einfach mit der Vorgabe weitergeblättert."""
+    try:
+        schalter = page.locator("text=/\\d+ pro Seite/").first
+        if not schalter.count():
+            return False
+        if schalter.inner_text().strip().startswith(str(groesse)):
+            return True
+        schalter.click(timeout=4_000)
+        time.sleep(1)
+        wahl = page.get_by_text(f"{groesse} pro Seite", exact=True).first
+        if not wahl.count():
+            page.keyboard.press("Escape")
+            return False
+        wahl.click(timeout=4_000)
+        time.sleep(3)
+        return True
+    except Exception as e:
+        print(f"    Seitengröße konnte nicht gesetzt werden: {e}")
+        return False
+
+
+def _moss_erste_zeile(page) -> str:
+    try:
+        return page.evaluate(
+            "() => { const z = document.querySelector('[row-id]');"
+            " return z ? z.getAttribute('row-id') : ''; }") or ""
+    except Exception:
+        return ""
+
+
+def _moss_blaettern(page, richtung: str = "Next") -> bool:
+    """Blättert eine Seite weiter ("Next") oder zurück ("Previous"). False,
+    wenn es dort nicht weitergeht. Moss beschriftet die Knöpfe mit
+    aria-label "Next page" / "Previous page"."""
+    knopf = page.locator(f'[aria-label="{richtung} page"]').first
+    try:
+        if not knopf.count() or knopf.is_disabled():
+            return False
+        vorher = _moss_erste_zeile(page)
+        knopf.click(timeout=4_000)
+    except Exception as e:
+        print(f"    Blättern ({richtung}) fehlgeschlagen: {e}")
+        return False
+    # Warten, bis wirklich andere Zeilen dastehen – sonst liest die nächste
+    # Runde dieselbe Seite noch einmal.
+    for _ in range(20):
+        time.sleep(0.4)
+        if _moss_erste_zeile(page) != vorher:
+            break
+    time.sleep(0.6)
+    return True
+
+
+def _zeilen_zusammenfuehren(seiten: list) -> list:
+    """Führt die Zeilen mehrerer Tabellenseiten ohne Dubletten zusammen.
+
+    Dubletten entstehen, wenn eine Seite beim Blättern noch nicht neu geladen
+    war – dann liest die nächste Runde dieselben Zeilen erneut. Die Reihenfolge
+    bleibt erhalten (Moss sortiert absteigend nach Datum).
+    """
+    zusammen, gesehen = [], set()
+    for zeilen in seiten:
+        for row in zeilen:
+            rid = row.get("row_id")
+            if not rid or rid in gesehen:
+                continue
+            gesehen.add(rid)
+            zusammen.append(row)
+    return zusammen
+
+
+def _moss_alle_zeilen(page) -> list:
+    """Alle Transaktionszeilen über alle Tabellenseiten hinweg."""
+    _moss_seitengroesse_setzen(page)
+    seiten = []
+    for nr in range(1, MOSS_MAX_PAGES + 1):
+        time.sleep(1.5)
+        seiten.append(_extract_moss_open_rows(page))
+        if not _moss_blaettern(page, "Next"):
+            break
+    else:
+        print(f"    Abbruch nach {MOSS_MAX_PAGES} Seiten – unerwartet viele.")
+    zeilen = _zeilen_zusammenfuehren(seiten)
+    print(f"  Moss: {len(zeilen)} Transaktion(en) über {len(seiten)} Tabellenseite(n) erfasst.")
+    return zeilen
+
+
+def _moss_zur_ersten_seite(page) -> None:
+    for _ in range(MOSS_MAX_PAGES):
+        if not _moss_blaettern(page, "Previous"):
+            return
+
+
+def _moss_zeile_suchen(page, row_id: str) -> bool:
+    """Sorgt dafür, dass die Zeile im DOM steht – notfalls durch Blättern.
+
+    Nötig, weil nur bearbeitet werden kann, was gerade gerendert ist, und weil
+    sich die Seitenaufteilung nach jedem Upload verschiebt: Eine Zeile, die in
+    der Ansicht 'Beleg fehlt' einen Beleg bekommen hat, fällt heraus und alle
+    folgenden rutschen eine Position nach vorn.
+    """
+    if page.locator(f'[row-id="{row_id}"]').count() > 0:
+        return True
+    _moss_zur_ersten_seite(page)
+    for _ in range(MOSS_MAX_PAGES):
+        time.sleep(1)
+        if page.locator(f'[row-id="{row_id}"]').count() > 0:
+            return True
+        if not _moss_blaettern(page, "Next"):
+            return False
+    return False
+
+
 def _moss_detail_schliessen(page) -> None:
     """Schließt ein offenes Detailfeld, falls eines steht.
 
@@ -1559,22 +1684,13 @@ def _open_moss_row(page, row_id: str, warte_auf: str) -> str:
     """
     _moss_detail_schliessen(page)
     zeile = page.locator(f'[row-id="{row_id}"]').first
-    # Nach dem Durchscrollen kann die Zeile aus dem DOM gefallen sein
-    # (Virtualisierung). Dann erst wieder hinscrollen, bis sie auftaucht.
+    # Die Zeile kann auf einer anderen Tabellenseite stehen (Moss blättert,
+    # es scrollt nicht) – dann erst dorthin blättern.
     if zeile.count() == 0:
-        page.evaluate(_MOSS_SCROLL_TOP_JS)
-        time.sleep(0.3)
-        for _ in range(MOSS_MAX_SCROLLS):
-            if page.locator(f'[row-id="{row_id}"]').count() > 0:
-                break
-            stand = page.evaluate(_MOSS_SCROLL_JS, None)
-            if not stand.get("ok") or not stand.get("bewegt"):
-                break
-            time.sleep(0.35)
-        zeile = page.locator(f'[row-id="{row_id}"]').first
-        if zeile.count() == 0:
+        if not _moss_zeile_suchen(page, row_id):
             print(f"    Zeile {row_id[:8]} nicht mehr in der Tabelle – übersprungen.")
             return "fehler"
+        zeile = page.locator(f'[row-id="{row_id}"]').first
     try:
         zeile.scroll_into_view_if_needed(timeout=8_000)
     except Exception:
@@ -1697,7 +1813,7 @@ def _fill_missing_buchungstexte(page) -> list[dict]:
     # Kein Klick auf die Kachel 'fehlende Informationen' mehr: der Selektor
     # darauf lief in einen Timeout und riss Phase 2 komplett mit. Die Zeilen
     # sind am Hinweis in der Händlerspalte erkennbar, also direkt filterbar.
-    all_rows = _extract_moss_open_rows(page)
+    all_rows = _moss_alle_zeilen(page)
     rows = [r for r in all_rows if r["needs_fields"]]
     print(f"Moss: {len(rows)} von {len(all_rows)} Transaktion(en) mit fehlenden Pflichtangaben.")
     if all_rows and not rows:
@@ -1933,7 +2049,7 @@ def apply_buchungstexte_from_slack(page) -> dict:
     time.sleep(4)
     rows = {_proposal_key(r["merchant"], r["amount"],
                           r["date"].strftime("%d.%m.%Y") if r["date"] else "?"): r
-            for r in _extract_moss_open_rows(page)}
+            for r in _moss_alle_zeilen(page)}
 
     for ts, answer in answers.items():
         rec = store[ts]
@@ -2034,7 +2150,7 @@ def sync_moss_open_invoices(page) -> dict:
     page.goto(url, wait_until="domcontentloaded", timeout=30_000)
     time.sleep(4)
 
-    alle_zeilen = _extract_moss_open_rows(page)
+    alle_zeilen = _moss_alle_zeilen(page)
     mit_status = [r for r in alle_zeilen if (r.get("receipt_status") or "").strip()]
     if not mit_status:
         # Spalte unlesbar (Moss umbenannt?) – lieber alles prüfen als stumm
