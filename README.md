@@ -2,7 +2,7 @@
 
 Rechnungen automatisch von Amazon Business und Galaxus herunterladen und per Slack weiterleiten – mit lokaler Web-UI zur Verwaltung.
 
-![Flask](https://img.shields.io/badge/Flask-Web--UI-blue) ![Playwright](https://img.shields.io/badge/Playwright-Automatisierung-green) ![Slack](https://img.shields.io/badge/Slack-Integration-purple)
+[![Tests](https://github.com/patrickkipp-hero/BillBridge/actions/workflows/tests.yml/badge.svg)](https://github.com/patrickkipp-hero/BillBridge/actions/workflows/tests.yml) ![Flask](https://img.shields.io/badge/Flask-Web--UI-blue) ![Playwright](https://img.shields.io/badge/Playwright-Automatisierung-green) ![Slack](https://img.shields.io/badge/Slack-Integration-purple)
 
 ## Features
 
@@ -12,6 +12,7 @@ Rechnungen automatisch von Amazon Business und Galaxus herunterladen und per Sla
 - **Slack-Integration**: PDFs direkt in einen Channel oder als DM an eine App (z.B. Moss) senden
 - **Web-UI**: Übersicht, manuelle Ausführung, Einstellungen – erreichbar unter `http://localhost:5757`
 - **Automatischer Tagesrun**: Per macOS LaunchAgent täglich um 10 Uhr (konfigurierbar)
+- **Störungsmeldungen**: Abgebrochene Läufe und abgelaufene Sessions melden sich selbst in Slack, statt still im Log zu landen
 
 ## Voraussetzungen
 
@@ -132,6 +133,100 @@ cp de.hero-software.billbridge.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/de.hero-software.billbridge.plist
 ```
 
+## Störungsmeldungen
+
+Fehler landeten früher nur in `billbridge.log` – ein Lauf gegen eine abgelaufene
+Session sah in der Oberfläche aus wie ein normaler Lauf ohne neue Rechnungen.
+Jetzt meldet BillBridge solche Störungen zusätzlich in Slack, mit Hinweis, was
+zu tun ist:
+
+- fehlgeschlagener Amazon-, Gmail- oder Anbieter-Lauf
+- abgebrochener Moss-Abgleich
+- Moss-Fenster geschlossen oder nicht mehr eingeloggt, während Buchungstexte warten
+
+Dieselbe Störung wird höchstens alle 6 Stunden gemeldet (`ALERT_COOLDOWN_HOURS`);
+wie oft sie zwischendurch auftrat, steht in der nächsten Nachricht. Läuft es
+wieder, kommt eine Entwarnung. Standardziel ist `SLACK_CHANNEL_ID`,
+`SLACK_ALERT_CHANNEL_ID` lenkt die Meldungen woanders hin. Welche Störungen
+gerade offen sind, steht in `alerts_sent.json`.
+
+## Protokoll
+
+`billbridge.log` wuchs unbegrenzt – nach wenigen Wochen 1,9 MB und 27.772
+Zeilen. Jetzt wird bei 2 MB auf das letzte 1 MB gekürzt (`LOG_MAX_BYTES`,
+`LOG_KEEP_BYTES`).
+
+Gekürzt wird **in der Datei selbst**, nicht durch Umbenennen wie bei
+`logging.handlers.RotatingFileHandler`: Der LaunchAgent leitet stdout und
+stderr des Dienstes auf genau diese Datei um und hält sie mit `O_APPEND`
+offen (nachprüfbar mit `lsof -p <pid> +fg`, Flag `AP`). Nach einem Umbenennen
+schriebe launchd in die umbenannte Datei weiter und das Protokoll liefe an
+zwei Stellen auseinander. Weil launchd mit `O_APPEND` schreibt, landet sein
+nächster Eintrag nach dem Kürzen am neuen Dateiende – es entsteht keine Lücke.
+
+Zwei Drittel des Inhalts waren außerdem Lärm und fallen jetzt weg:
+
+* **6.300 Zeilen** „Überspringe (kein Rechnungs-PDF)" – jede
+  Bestellbestätigung bringt AGB und Widerrufsformular mit, bei jedem Lauf
+  aufs Neue. Statt einer Zeile je Anhang steht am Ende eine Summenzeile.
+* **6.002 Zeilen** Flask-Zugriffsprotokoll (23 %) – die Oberfläche fragt
+  `/api/status` im Sekundentakt ab. Erfolgreiche Abfragen werden gefiltert,
+  Fehler (404, 500) bleiben drin.
+
+## Buchungstext-Vorschläge: Lebenszyklus
+
+Ein Vorschlag wird in den Slack-Thread gepostet und wartet dort auf eine
+Antwort. Was danach passiert:
+
+| Status | Bedeutung |
+|---|---|
+| `open` | wartet auf eine Antwort im Thread oder auf das Eintragen |
+| `applied` | Buchungstext steht in Moss |
+| `ersetzt` | wurde durch einen neu geposteten Thread abgelöst |
+| `verfallen` | aufgegeben – der Grund steht in `verfallen_grund` |
+
+Aufgegeben wird aus drei Gründen, jeder mit genau einem Hinweis im Thread:
+
+* **`nicht_auffindbar`** – die Transaktion fehlt seit 14 Tagen durchgehend in
+  Moss (`MOSS_PROPOSAL_MISSING_DAYS`), vermutlich exportiert. Gezählt wird die
+  Dauer, nicht der einzelne Fehlversuch: Eine Transaktion kann kurzzeitig aus
+  der Ansicht fallen, und taucht sie wieder auf, beginnt die Frist von vorn.
+* **`ohne_antwort`** – seit 30 Tagen keine Antwort im Thread
+  (`MOSS_PROPOSAL_NO_ANSWER_DAYS`). Gilt nur für unbeantwortete; wer geantwortet
+  hat, verliert seine Antwort nicht durch Zeitablauf.
+* **`gesperrt`** – Moss lässt das Feld nicht mehr bearbeiten. Erkennbar daran,
+  dass sich das Detailfeld öffnet, die Steuerung darin aber fehlt. Beim
+  Beleg-Upload erscheinen solche Transaktionen im Protokoll als eigene Gruppe
+  („in Moss gesperrt") statt in der Sammelzahl unterzugehen.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python3 -m pytest tests/ -q
+```
+
+Bei jedem Push und jedem Pull Request laufen sie zusätzlich als GitHub Action
+(`.github/workflows/tests.yml`), auf Python 3.9 und 3.13. Dort werden
+**nur** die Test-Abhängigkeiten installiert – schleicht sich eine Abhängigkeit
+auf Playwright, pdfplumber, Slack oder das Netz ein, fällt das in der CI auf
+und nicht erst auf dem Rechner einer Kollegin.
+
+Die Tests decken die Stellen ab, an denen falsche Daten nach Moss gelangen
+könnten. Sie brauchen weder Browser noch Netz noch `slack_sdk` und laufen
+deshalb auch mit einem Python, das die Abhängigkeiten nicht hat – anders als
+`app.py` und `main.py` selbst, die denselben Interpreter brauchen, den auch
+`setup.sh` wählt (in der Regel `/usr/bin/python3`):
+
+| Datei | Was festgeschrieben ist |
+|---|---|
+| `test_beleg_zuordnung.py` | Betrag auf den Cent genau, Datumsfenster ±14 Tage, nächstes Datum gewinnt |
+| `test_positionen.py` | Produktzeilen aus Amazon-Tabellen, Galaxus (mit/ohne MwSt.-Spalte) und Airalo |
+| `test_slack_antwort.py` | Säubern der Thread-Antworten: HTML-Entitäten, Aufzählungen, Mengenangaben |
+| `test_stoerungsmeldung.py` | Cooldown, Entwarnung, Verhalten ohne Token und bei Slack-Ausfall |
+| `test_vorschlag_lebenszyklus.py` | Fristen zum Ablegen, Zurücksetzen bei wiedergefundener Transaktion, Hinweis im Thread |
+| `test_protokoll.py` | Kürzen in derselben Datei (Inode), Zeilengrenzen, Filter fürs Zugriffsprotokoll |
+
 ## Projektstruktur
 
 ```
@@ -140,6 +235,8 @@ BillBridge/
 ├── main.py                 # Scraping-Logik (Amazon, Galaxus)
 ├── templates/index.html    # Single-Page-App
 ├── static/                 # CSS/Assets
+├── tests/                  # pytest, ohne Browser und Netz lauffähig
+├── .github/workflows/      # CI: pytest auf 3.9 und 3.13
 ├── .env.example            # Konfigurationsvorlage
 ├── providers.example.json  # Vorlage für Custom-Provider
 └── requirements.txt

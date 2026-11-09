@@ -1,0 +1,36 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    # Image bewusst festgenagelt statt ubuntu-latest: Dort gibt es seit
+    # Ubuntu 26.04 kein fertiges Python 3.9 mehr, und genau das läuft auf den
+    # Arbeitsrechnern. 24.04 hat 3.9 und 3.13.
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 ist der Boden (das /usr/bin/python3 auf den Arbeitsrechnern),
+        # 3.13 fängt Abweichungen neuerer Versionen ab.
+        python-version: ["3.9", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Bewusst NUR die Test-Abhängigkeiten: Die Tests sollen ohne Playwright,
+      # pdfplumber und slack_sdk laufen. Schleicht sich irgendwo eine
+      # Abhängigkeit auf einen Browser, das Netz oder Slack ein, fällt das hier
+      # auf und nicht erst auf dem Rechner einer Kollegin.
+      - name: Test-Abhängigkeiten installieren
+        run: pip install -r requirements-dev.txt
+
+      - name: Tests
+        run: python -m pytest tests/ -q

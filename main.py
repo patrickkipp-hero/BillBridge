@@ -52,6 +52,144 @@ def check_config():
         sys.exit(1)
 
 
+# ── Störungsmeldungen nach Slack ─────────────────────────────────────────────
+# Fehler landeten bisher ausschließlich in billbridge.log. Ein stiller Lauf
+# (abgelaufene Amazon-Session, ausgeloggtes Moss) sah in der Oberfläche aus wie
+# ein normaler Lauf ohne neue Rechnungen – gemerkt hat man es erst Tage später.
+# Deshalb geht jede Störung zusätzlich als Nachricht in den Slack-Kanal.
+#
+# Ziel ist standardmäßig derselbe Kanal wie die Rechnungen (bei einer
+# Installation pro Person also der persönliche Kanal). SLACK_ALERT_CHANNEL_ID
+# lenkt die Meldungen bei Bedarf woanders hin.
+
+ALERT_STATE_FILE = Path("alerts_sent.json")
+ALERT_COOLDOWN_HOURS = float(os.getenv("ALERT_COOLDOWN_HOURS", "6"))
+
+
+def _alert_channel() -> Optional[str]:
+    # Bewusst bei jedem Aufruf aus der Umgebung lesen statt beim Import:
+    # Die Oberfläche schreibt .env zur Laufzeit neu.
+    return os.getenv("SLACK_ALERT_CHANNEL_ID") or os.getenv("SLACK_CHANNEL_ID")
+
+
+def _load_alert_state() -> dict:
+    try:
+        return json.loads(ALERT_STATE_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_alert_state(state: dict) -> None:
+    try:
+        ALERT_STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    except OSError as e:
+        print(f"    Störungsspeicher nicht schreibbar: {e}")
+
+
+def _alert_text(titel: str, details: str, hinweis: str, auszug: str,
+                unterdrueckt: int, seit: Optional[str]) -> str:
+    zeilen = [f":warning: *BillBridge: {titel}*"]
+    if details:
+        zeilen.append(details)
+    if unterdrueckt:
+        wann = f" seit {seit}" if seit else ""
+        zeilen.append(f"_Trat seitdem {unterdrueckt}× weiter auf{wann}, "
+                      f"ohne jedes Mal gemeldet zu werden._")
+    if hinweis:
+        zeilen.append(f"*Was zu tun ist:* {hinweis}")
+    if auszug:
+        zeilen.append(f"```{auszug.strip()}```")
+    return "\n".join(zeilen)
+
+
+def notify_failure(titel: str, details: str = "", hinweis: str = "",
+                   kennung: Optional[str] = None, auszug: str = "",
+                   cooldown_hours: Optional[float] = None) -> bool:
+    """Meldet eine Störung in den Slack-Kanal. Gibt True zurück, wenn wirklich
+    gesendet wurde.
+
+    Dieselbe Störung wird höchstens alle ALERT_COOLDOWN_HOURS Stunden gemeldet
+    – ein täglicher Lauf gegen eine tote Session würde den Kanal sonst
+    zumüllen. Wie oft sie zwischendurch auftrat, steht in der nächsten
+    Nachricht. Diese Funktion wirft nie: eine kaputte Benachrichtigung darf
+    keinen Lauf abbrechen.
+    """
+    kennung = kennung or titel
+    jetzt = datetime.now()
+    state = _load_alert_state()
+    eintrag = state.get(kennung) or {}
+
+    letzte = eintrag.get("zuletzt")
+    if letzte:
+        try:
+            vergangen = (jetzt - datetime.fromisoformat(letzte)).total_seconds() / 3600
+        except ValueError:
+            vergangen = None
+        grenze = ALERT_COOLDOWN_HOURS if cooldown_hours is None else cooldown_hours
+        if vergangen is not None and vergangen < grenze:
+            eintrag["unterdrueckt"] = eintrag.get("unterdrueckt", 0) + 1
+            state[kennung] = eintrag
+            _save_alert_state(state)
+            print(f"    Störung '{kennung}' bereits vor {vergangen:.1f} h gemeldet "
+                  f"– keine zweite Nachricht.")
+            return False
+
+    channel = _alert_channel()
+    token = os.getenv("SLACK_BOT_TOKEN")
+    if not channel or not token:
+        print(f"    Störung '{kennung}' nicht meldbar: Slack-Kanal oder Token fehlt.")
+        return False
+
+    text = _alert_text(titel, details, hinweis, auszug,
+                       eintrag.get("unterdrueckt", 0), eintrag.get("seit"))
+    try:
+        from slack_sdk import WebClient
+        WebClient(token=token).chat_postMessage(channel=channel, text=text)
+    except Exception as e:
+        # Slack unerreichbar: ins Log, aber den Lauf nicht beeinflussen.
+        print(f"    Störungsmeldung konnte nicht gesendet werden: {e}")
+        return False
+
+    state[kennung] = {"seit": eintrag.get("seit") or jetzt.isoformat(timespec="seconds"),
+                      "zuletzt": jetzt.isoformat(timespec="seconds"),
+                      "unterdrueckt": 0,
+                      "titel": titel}
+    _save_alert_state(state)
+    print(f"    Störung '{kennung}' nach Slack gemeldet.")
+    return True
+
+
+def notify_recovery(kennung: str, titel: str) -> bool:
+    """Entwarnung, nachdem eine gemeldete Störung behoben ist.
+
+    Wird nur gesendet, wenn vorher tatsächlich eine Störung gemeldet wurde –
+    sonst käme nach jedem erfolgreichen Lauf eine Nachricht. Räumt den
+    Störungsspeicher auf, damit die nächste Störung sofort wieder meldet statt
+    in den Cooldown zu laufen.
+    """
+    state = _load_alert_state()
+    eintrag = state.pop(kennung, None)
+    if not eintrag:
+        return False
+    _save_alert_state(state)
+
+    channel = _alert_channel()
+    token = os.getenv("SLACK_BOT_TOKEN")
+    if not channel or not token:
+        return False
+    seit = eintrag.get("seit", "")
+    text = f":white_check_mark: *BillBridge: {titel} läuft wieder.*"
+    if seit:
+        text += f"\n_Gestört seit {seit}._"
+    try:
+        from slack_sdk import WebClient
+        WebClient(token=token).chat_postMessage(channel=channel, text=text)
+    except Exception as e:
+        print(f"    Entwarnung konnte nicht gesendet werden: {e}")
+        return False
+    return True
+
+
 def _amazon_do_login(page, PwTimeout) -> bool:
     """Führt den Amazon-Login-Flow durch. Gibt True zurück wenn erfolgreich."""
     def _is_on_login_page():
@@ -768,6 +906,10 @@ def download_gmail_invoices() -> list[Path]:
     import email as _email
     import email.header
     import hashlib
+    from collections import Counter
+
+    # Übersprungene Anhänge nur zählen statt einzeln protokollieren.
+    uebersprungen: Counter = Counter()
 
     if not GMAIL_EMAIL or not GMAIL_APP_PASSWORD:
         print("Gmail: GMAIL_EMAIL und GMAIL_APP_PASSWORD nicht konfiguriert.")
@@ -838,7 +980,11 @@ def download_gmail_invoices() -> list[Path]:
             skip_keywords = ["agb", "widerrufs", "terms", "conditions", "datenschutz",
                              "privacy", "cancellation", "return_policy"]
             if any(kw in decoded.lower() for kw in skip_keywords):
-                print(f"  Überspringe (kein Rechnungs-PDF): {decoded}")
+                # Nicht je Anhang eine Zeile: Jede Bestellbestätigung bringt
+                # AGB und Widerrufsformular mit, bei jedem Lauf aufs Neue. Das
+                # waren 6.300 der 27.772 Zeilen im Protokoll. Am Ende steht
+                # stattdessen eine Summenzeile.
+                uebersprungen[decoded] += 1
                 continue
 
             payload = part.get_payload(decode=True)
@@ -869,6 +1015,12 @@ def download_gmail_invoices() -> list[Path]:
             save_seen_order_id(dedup_key)
 
     mail.logout()
+    if uebersprungen:
+        beispiele = ", ".join(f"{name} ({n}x)" for name, n
+                              in uebersprungen.most_common(3))
+        print(f"Gmail: {sum(uebersprungen.values())} Anhang/Anhänge übersprungen "
+              f"(AGB, Widerrufsformular o.ä.): {beispiele}"
+              + (" …" if len(uebersprungen) > 3 else ""))
     print(f"Gmail: {len(downloaded)} neue Rechnung(en) heruntergeladen.")
     return downloaded
 
@@ -876,6 +1028,63 @@ def download_gmail_invoices() -> list[Path]:
 # ── Rechnungs-PDFs: Produktbeschreibungen extrahieren ────────────────────────
 
 _NON_PRODUCT_ROW_LABELS = {"versandkosten", "aktionsrabatt", "gutschein", "rabatt", "verpackung", "pfand"}
+
+
+def _line_items_from_table(table) -> list[str]:
+    """Produktzeilen aus einer Amazon-Rechnungstabelle (Beschreibung, Menge, …).
+
+    Ohne pdfplumber testbar: erwartet die Tabelle so, wie page.extract_tables()
+    sie liefert – eine Liste von Zeilen, jede Zeile eine Liste von Zellen.
+    """
+    items = []
+    for row in table or []:
+        if not row or len(row) < 2:
+            continue
+        desc, qty = row[0], row[1]
+        # Ohne Mengenangabe ist es keine Produktzeile, sondern Kopf oder Summe.
+        if not desc or not qty or not qty.strip().isdigit():
+            continue
+        if desc.strip().lower() in _NON_PRODUCT_ROW_LABELS:
+            continue
+        desc_clean = re.sub(r"\n?ASIN:\S+", "", desc).replace("\n", " ").strip()
+        desc_clean = re.sub(r"\s+", " ", desc_clean)
+        if desc_clean:
+            items.append(desc_clean)
+    return items
+
+
+def _line_items_from_text(text: str) -> list[str]:
+    """Produktzeilen aus dem reinen PDF-Text (Galaxus- und Airalo-Layout).
+
+    Fällt nur an, wenn die Tabellenerkennung nichts geliefert hat.
+    """
+    items = []
+    # Galaxus, Eigenverkauf (mit MwSt.-Spalte):
+    #   "Produktname 24121911 19.05.2026 1 19,00% 336,13 399,99 ..."
+    # Galaxus, Drittanbieter (Spalten "Menge Preis Betrag", KEINE
+    # MwSt.-Spalte, Beschreibung mit Fußnotenmarke "1)"):
+    #   "Apple TV 4K (3. Gen) ... 1) 22720374 18.08.2026 1 330,07 330,07"
+    # Die Prozentspalte ist deshalb optional; danach muss aber ein
+    # Betrag stehen, damit nicht jede Textzeile mit Zahlen greift.
+    # In der Spalte "Versand" steht entweder ein Datum oder der
+    # Status "nicht geliefert" (dessen zweites Wort in die nächste
+    # Zeile umbricht) – beides muss die Position passieren lassen.
+    galaxus_row = (r"^(.+?)\s+\d{6,}\s+(?:\d{2}\.\d{2}\.\d{4}|nicht)\s+\d+"
+                   r"\s+(?:[\d,]+%\s+)?[\d.]*\d,\d{2}")
+    for m in re.finditer(galaxus_row, text, re.MULTILINE):
+        desc = re.sub(r"\s+", " ", m.group(1)).strip()
+        # Fußnotenmarke der Drittanbieter-Positionen entfernen.
+        # Leerzeichen davor ist Pflicht und die Zahl kurz, sonst
+        # verstümmelt das Produktangaben wie '... (13.60", 16:10)'.
+        desc = re.sub(r"\s+\d{1,2}\)$", "", desc).strip()
+        if desc:
+            items.append(desc)
+    # Airalo: "1 Europa - eSIM - Unbegrenzt - 30 Tage 63.50 € 63.50 €"
+    if not items:
+        for m in re.finditer(r"^\d+\s+(.+?)\s+[\d.,]+\s*€\s+[\d.,]+\s*€\s*$",
+                             text, re.MULTILINE):
+            items.append(re.sub(r"\s+", " ", m.group(1)).strip())
+    return items
 
 
 def extract_invoice_line_items(pdf_path: Path) -> list[str]:
@@ -889,45 +1098,11 @@ def extract_invoice_line_items(pdf_path: Path) -> list[str]:
             # Amazon: Tabellenstruktur mit Beschreibung + Menge
             for page in pdf.pages:
                 for table in page.extract_tables():
-                    for row in table:
-                        if not row or len(row) < 2:
-                            continue
-                        desc, qty = row[0], row[1]
-                        if not desc or not qty or not qty.strip().isdigit():
-                            continue
-                        if desc.strip().lower() in _NON_PRODUCT_ROW_LABELS:
-                            continue
-                        desc_clean = re.sub(r"\n?ASIN:\S+", "", desc).replace("\n", " ").strip()
-                        desc_clean = re.sub(r"\s+", " ", desc_clean)
-                        if desc_clean:
-                            items.append(desc_clean)
+                    items.extend(_line_items_from_table(table))
 
             if not items:
                 text = "\n".join(p.extract_text() or "" for p in pdf.pages)
-                # Galaxus, Eigenverkauf (mit MwSt.-Spalte):
-                #   "Produktname 24121911 19.05.2026 1 19,00% 336,13 399,99 ..."
-                # Galaxus, Drittanbieter (Spalten "Menge Preis Betrag", KEINE
-                # MwSt.-Spalte, Beschreibung mit Fußnotenmarke "1)"):
-                #   "Apple TV 4K (3. Gen) ... 1) 22720374 18.08.2026 1 330,07 330,07"
-                # Die Prozentspalte ist deshalb optional; danach muss aber ein
-                # Betrag stehen, damit nicht jede Textzeile mit Zahlen greift.
-                # In der Spalte "Versand" steht entweder ein Datum oder der
-                # Status "nicht geliefert" (dessen zweites Wort in die nächste
-                # Zeile umbricht) – beides muss die Position passieren lassen.
-                galaxus_row = (r"^(.+?)\s+\d{6,}\s+(?:\d{2}\.\d{2}\.\d{4}|nicht)\s+\d+"
-                               r"\s+(?:[\d,]+%\s+)?[\d.]*\d,\d{2}")
-                for m in re.finditer(galaxus_row, text, re.MULTILINE):
-                    desc = re.sub(r"\s+", " ", m.group(1)).strip()
-                    # Fußnotenmarke der Drittanbieter-Positionen entfernen.
-                    # Leerzeichen davor ist Pflicht und die Zahl kurz, sonst
-                    # verstümmelt das Produktangaben wie '... (13.60", 16:10)'.
-                    desc = re.sub(r"\s+\d{1,2}\)$", "", desc).strip()
-                    if desc:
-                        items.append(desc)
-                # Airalo: "1 Europa - eSIM - Unbegrenzt - 30 Tage 63.50 € 63.50 €"
-                if not items:
-                    for m in re.finditer(r"^\d+\s+(.+?)\s+[\d.,]+\s*€\s+[\d.,]+\s*€\s*$", text, re.MULTILINE):
-                        items.append(re.sub(r"\s+", " ", m.group(1)).strip())
+                items.extend(_line_items_from_text(text))
     except Exception as e:
         print(f"    PDF-Textextraktion fehlgeschlagen ({pdf_path.name}): {e}")
     return items
@@ -1225,6 +1400,130 @@ def _save_moss_proposals(store: dict) -> None:
     MOSS_PROPOSALS_FILE.write_text(json.dumps(store, indent=2, ensure_ascii=False))
 
 
+# ── Lebenszyklus der Buchungstext-Vorschläge ────────────────────────────────
+# Vorschläge blieben bisher für immer "open": Beantwortete, deren Transaktion
+# Moss nicht mehr anzeigt, wurden alle 15 Minuten erneut versucht, und die
+# Zahl der offenen Vorschläge sagte nichts mehr aus, weil tote mitzählten.
+
+# Eine Transaktion kann vorübergehend aus der Ansicht fallen (Filter,
+# virtualisierte Tabelle, laufender Export). Deshalb zählt nicht der einzelne
+# Fehlversuch, sondern wie lange sie durchgehend unauffindbar ist.
+MOSS_PROPOSAL_MISSING_DAYS = 14
+# Ein Vorschlag ohne Antwort im Thread wird nach dieser Frist abgelegt.
+MOSS_PROPOSAL_NO_ANSWER_DAYS = 30
+
+
+def _parse_iso(wert) -> Optional[datetime]:
+    """ISO-Zeitstempel aus dem Vorschlagsspeicher lesen, tolerant gegen Müll."""
+    if not wert:
+        return None
+    try:
+        return datetime.fromisoformat(str(wert))
+    except ValueError:
+        return None
+
+
+def _proposal_posted_at(ts: str, rec: dict) -> Optional[datetime]:
+    """Wann der Vorschlag gepostet wurde. posted_at ist maßgeblich; fehlt es
+    (alte Einträge), dient der Slack-Zeitstempel des Threads als Ersatz."""
+    gepostet = _parse_iso(rec.get("posted_at"))
+    if gepostet:
+        return gepostet
+    try:
+        return datetime.fromtimestamp(float(ts))
+    except (TypeError, ValueError):
+        return None
+
+
+def _proposal_missing_seen(rec: dict, jetzt: datetime) -> None:
+    """Vermerkt, dass die Transaktion zu diesem Vorschlag nicht auffindbar war."""
+    rec["nicht_gefunden_seit"] = (rec.get("nicht_gefunden_seit")
+                                  or jetzt.isoformat(timespec="seconds"))
+    rec["nicht_gefunden_versuche"] = rec.get("nicht_gefunden_versuche", 0) + 1
+
+
+def _proposal_missing_cleared(rec: dict) -> None:
+    """Transaktion ist wieder da – die Frist beginnt im Zweifel von vorn."""
+    rec.pop("nicht_gefunden_seit", None)
+    rec.pop("nicht_gefunden_versuche", None)
+
+
+def _proposal_give_up_reason(ts: str, rec: dict, beantwortet: bool,
+                             jetzt: Optional[datetime] = None) -> Optional[str]:
+    """Grund, einen offenen Vorschlag abzulegen – oder None, wenn er bleibt.
+
+    'nicht_auffindbar': beantwortet, aber die Transaktion fehlt seit
+    MOSS_PROPOSAL_MISSING_DAYS Tagen durchgehend in Moss.
+    'ohne_antwort': seit MOSS_PROPOSAL_NO_ANSWER_DAYS Tagen keine Antwort im
+    Thread. Gilt nur für unbeantwortete – wer geantwortet hat, soll seine
+    Antwort nicht wegen Zeitablaufs verlieren.
+    """
+    jetzt = jetzt or datetime.now()
+    seit = _parse_iso(rec.get("nicht_gefunden_seit"))
+    if seit and (jetzt - seit).days >= MOSS_PROPOSAL_MISSING_DAYS:
+        return "nicht_auffindbar"
+    if not beantwortet:
+        gepostet = _proposal_posted_at(ts, rec)
+        if gepostet and (jetzt - gepostet).days >= MOSS_PROPOSAL_NO_ANSWER_DAYS:
+            return "ohne_antwort"
+    return None
+
+
+# Die Dauer steht nur drin, wenn sie bekannt ist. Beim Aufräumen von Hand
+# fehlt der Vermisst-Beginn, und "seit 31 Tagen nicht auffindbar" wäre dann
+# schlicht falsch: Beim Posten war die Transaktion noch da, sonst hätte es den
+# Vorschlag nie gegeben.
+_PROPOSAL_RETIRE_TEXTS = {
+    "nicht_auffindbar": (
+        "⏳ Diese Transaktion ist in Moss{dauer} nicht mehr auffindbar "
+        "(vermutlich exportiert oder abgeschlossen). Vorschlag abgelegt – falls "
+        "der Buchungstext noch gebraucht wird, bitte in Moss von Hand eintragen."),
+    "ohne_antwort": (
+        "⏳{dauer_satz} ohne Antwort abgelegt. Wird der Buchungstext noch "
+        "gebraucht, bitte in Moss von Hand eintragen."),
+    "gesperrt": (
+        "🔒 Moss lässt das Buchungstext-Feld dieser Transaktion nicht mehr "
+        "bearbeiten (exportiert oder gesperrt). Bitte von Hand eintragen."),
+}
+
+
+def _retire_proposal(client, ts: str, rec: dict, grund: str,
+                     jetzt: Optional[datetime] = None, text: str = "") -> None:
+    """Legt einen Vorschlag ab und sagt genau einmal im Thread Bescheid.
+
+    Der Hinweis geht in den Thread und nicht in den Kanal: dort steht die
+    Antwort, auf die er sich bezieht. Ist ein Buchungstext bekannt, steht er
+    mit in der Nachricht – der Hinweis bittet um Handarbeit in Moss, und dafür
+    braucht man den Text zum Kopieren.
+    """
+    jetzt = jetzt or datetime.now()
+    # Bezugspunkt je Grund: Bei "nicht_auffindbar" zählt, seit wann die
+    # Transaktion vermisst wird – ist das unbekannt, wird keine Dauer genannt.
+    # Bei "ohne_antwort" zählt das Alter des Vorschlags.
+    bezug = (_parse_iso(rec.get("nicht_gefunden_seit")) if grund == "nicht_auffindbar"
+             else _proposal_posted_at(ts, rec))
+    tage = max((jetzt - bezug).days, 0) if bezug else None
+    dauer = f" seit {tage} Tagen" if tage is not None else ""
+    dauer_satz = f" Nach {tage} Tagen" if tage is not None else ""
+    rec["status"] = "verfallen"
+    rec["verfallen_grund"] = grund
+    rec["verfallen_am"] = jetzt.isoformat(timespec="seconds")
+
+    print(f"  Vorschlag abgelegt ({grund}): {rec.get('merchant')} "
+          f"{rec.get('amount', 0):.2f} € ({rec.get('date')})")
+    vorlage = _PROPOSAL_RETIRE_TEXTS.get(grund)
+    if not (client and vorlage):
+        return
+    nachricht = vorlage.format(dauer=dauer, dauer_satz=dauer_satz)
+    if text.strip():
+        nachricht += f"\nDein Buchungstext zum Kopieren: `{text.strip()[:300]}`"
+    try:
+        client.chat_postMessage(channel=rec["channel"], thread_ts=ts,
+                                text=nachricht)
+    except Exception as e:
+        print(f"    Hinweis im Thread fehlgeschlagen: {e}")
+
+
 def _moss_detail_schliessen(page) -> None:
     """Schließt ein offenes Detailfeld, falls eines steht.
 
@@ -1246,8 +1545,11 @@ def _moss_detail_schliessen(page) -> None:
         pass
 
 
-def _open_moss_row(page, row_id: str, warte_auf: str) -> bool:
-    """Öffnet eine Transaktionszeile und meldet, ob das Detailfeld aufging.
+def _open_moss_row(page, row_id: str, warte_auf: str) -> str:
+    """Öffnet eine Transaktionszeile und meldet, was dabei herauskam:
+    "ok", "gesperrt" (Detailfeld ging auf, die Steuerung fehlt aber – so
+    verhält sich Moss bei exportierten/abgeschlossenen Transaktionen) oder
+    "fehler" (Zeile nicht gefunden oder nicht anklickbar).
 
     Der direkte Klick scheitert reproduzierbar daran, dass eine schwebende
     Leiste von Moss über der Zeile liegt ("intercepts pointer events"):
@@ -1272,7 +1574,7 @@ def _open_moss_row(page, row_id: str, warte_auf: str) -> bool:
         zeile = page.locator(f'[row-id="{row_id}"]').first
         if zeile.count() == 0:
             print(f"    Zeile {row_id[:8]} nicht mehr in der Tabelle – übersprungen.")
-            return False
+            return "fehler"
     try:
         zeile.scroll_into_view_if_needed(timeout=8_000)
     except Exception:
@@ -1284,29 +1586,39 @@ def _open_moss_row(page, row_id: str, warte_auf: str) -> bool:
             page.eval_on_selector(f'[row-id="{row_id}"]', "el => el.click()")
         except Exception as e:
             print(f"    Zeile {row_id[:8]} nicht anklickbar: {e}")
-            return False
+            return "fehler"
     # Genau auf die Steuerung warten, die der Aufrufer braucht. Vorher galt
     # das Feld schon als offen, wenn IRGENDEINE der beiden da war – dann lief
     # der Upload in einen Timeout, obwohl "offen" gemeldet wurde.
     try:
         page.locator(warte_auf).first.wait_for(state="attached", timeout=8_000)
-        return True
+        return "ok"
     except Exception:
-        vorhanden = page.locator(warte_auf).count()
-        print(f"    Detailfeld für Zeile {row_id[:8]} ohne erwartete Steuerung "
-              f"({warte_auf}, {vorhanden} Treffer) – übersprungen.")
+        # Steht das Detailfeld, fehlt aber die Steuerung, ist die Transaktion
+        # in Moss nicht mehr bearbeitbar – das ist kein Fehler unsererseits,
+        # sondern braucht Handarbeit. Vorher sah beides gleich aus
+        # ("übersprungen"), und niemand wusste, woran es lag.
+        dialog_offen = page.locator('[role="dialog"]').count() > 0
+        ausgang = "gesperrt" if dialog_offen else "fehler"
+        grund = ("Detailfeld offen, Feld aber nicht bearbeitbar "
+                 "(in Moss exportiert oder gesperrt)" if dialog_offen
+                 else "Detailfeld ging nicht auf")
+        print(f"    Zeile {row_id[:8]}: {grund} "
+              f"({warte_auf}, {page.locator(warte_auf).count()} Treffer).")
         # Offen gebliebenes Feld blockiert sonst jede folgende Zeile.
         _moss_detail_schliessen(page)
-        return False
+        return ausgang
 
 
-def _process_moss_transaction(page, row_id: str, pdf_path: Path, buchungstext: str) -> bool:
+def _process_moss_transaction(page, row_id: str, pdf_path: Path, buchungstext: str) -> str:
     """Öffnet die Transaktionszeile, lädt die Rechnung als Beleg hoch und
-    trägt den Buchungstext ein (beides speichert automatisch)."""
+    trägt den Buchungstext ein (beides speichert automatisch).
+    Gibt "ok", "gesperrt" oder "fehler" zurück."""
     try:
         upload_sel = '[data-file-upload-root="true"] input[type="file"]'
-        if not _open_moss_row(page, row_id, upload_sel):
-            return False
+        ausgang = _open_moss_row(page, row_id, upload_sel)
+        if ausgang != "ok":
+            return ausgang
 
         file_input = page.locator(upload_sel)
         file_input.set_input_files(str(pdf_path.resolve()))
@@ -1324,7 +1636,7 @@ def _process_moss_transaction(page, row_id: str, pdf_path: Path, buchungstext: s
         if close_btn.count():
             close_btn.first.click()
             time.sleep(1)
-        return True
+        return "ok"
     except Exception as e:
         print(f"    Fehler beim Bearbeiten der Transaktion: {e}")
         # Offen gebliebenes Detailfeld würde jede weitere Zeile blockieren.
@@ -1333,16 +1645,20 @@ def _process_moss_transaction(page, row_id: str, pdf_path: Path, buchungstext: s
             time.sleep(1)
         except Exception:
             pass
-        return False
+        return "fehler"
 
 
 def _fill_buchungstext_only(page, row_id: str, buchungstext: str) -> str:
     """Öffnet die Transaktionszeile und trägt nur den Buchungstext ein –
     aber ausschließlich, wenn das Feld noch leer ist (kein Überschreiben).
-    Gibt "filled", "skip" (war schon gefüllt) oder "error" zurück."""
+    Gibt "filled", "skip" (war schon gefüllt), "gesperrt" (Moss lässt das Feld
+    nicht mehr bearbeiten) oder "error" zurück."""
     try:
         text_sel = f'textarea[placeholder="{_MOSS_BUCHUNGSTEXT_PLACEHOLDER}"]'
-        if not _open_moss_row(page, row_id, text_sel):
+        ausgang = _open_moss_row(page, row_id, text_sel)
+        if ausgang == "gesperrt":
+            return "gesperrt"
+        if ausgang != "ok":
             return "error"
         textarea = page.locator(text_sel)
         textarea.wait_for(state="visible", timeout=10_000)
@@ -1521,7 +1837,11 @@ def _clean_reply_text(msg: dict) -> str:
     # Slack liefert &, < und > maskiert zurück: aus "P&C" wird "P&amp;C".
     # Ohne das Auflösen stünde die Maskierung wörtlich in Moss.
     text = html.unescape(text)
-    lines = [re.sub(r"^\s*[•\-\*\u2022\d]+[.)]?\s*", "", ln).strip()
+    # Aufzählungszeichen am Zeilenanfang entfernen – aber nur echte: Eine
+    # Ziffer zählt nur mit folgendem Punkt oder Klammer als Listenmarke.
+    # Sonst wird aus der Mengenangabe "2 Monitore für Berlin" in Moss
+    # "Monitore für Berlin" und aus "3x Dock" wird "x Dock".
+    lines = [re.sub(r"^\s*(?:[•\u2022]\s*|[-–]\s+|\d{1,2}[.)]\s+)", "", ln).strip()
              for ln in text.splitlines()]
     return "; ".join(ln for ln in lines if ln).strip()
 
@@ -1548,7 +1868,8 @@ def apply_buchungstexte_from_slack(page) -> dict:
     schreibt sie in das Buchungstext-Feld der Transaktion. Erwartet eine
     eingeloggte Moss-Page. Vorhandene Texte werden nicht überschrieben.
     """
-    result = {"applied": 0, "no_answer": 0, "not_found": 0, "failed": 0}
+    result = {"applied": 0, "no_answer": 0, "not_found": 0, "failed": 0,
+              "retired": 0, "locked": 0}
     store = _load_moss_proposals()
     open_items = {ts: r for ts, r in store.items() if r.get("status") == "open"}
     if not open_items:
@@ -1585,8 +1906,25 @@ def apply_buchungstexte_from_slack(page) -> dict:
         return result
 
     result["no_answer"] = len(open_items) - len(answers)
+
+    # Unbeantwortete Vorschläge altern lassen: nach der Frist einmal im Thread
+    # Bescheid sagen und ablegen. Sonst wächst der Speicher unbegrenzt und die
+    # gemeldete Zahl offener Vorschläge verliert ihre Aussagekraft.
+    jetzt = datetime.now()
+    for ts, rec in open_items.items():
+        if ts in answers:
+            continue
+        grund = _proposal_give_up_reason(ts, rec, beantwortet=False, jetzt=jetzt)
+        if grund:
+            _retire_proposal(client, ts, store[ts], grund, jetzt)
+            result["retired"] += 1
+            result["no_answer"] -= 1
+
     if not answers:
-        print(f"Moss: {len(open_items)} Vorschlag/Vorschläge offen, noch keine Antwort im Thread.")
+        _save_moss_proposals(store)
+        rest = (f", {result['retired']} abgelegt" if result["retired"] else "")
+        print(f"Moss: {result['no_answer']} Vorschlag/Vorschläge offen, noch keine "
+              f"Antwort im Thread{rest}.")
         return result
 
     print(f"Moss: {len(answers)} beantwortete(r) Vorschlag/Vorschläge – trage in Moss ein...")
@@ -1609,12 +1947,31 @@ def apply_buchungstexte_from_slack(page) -> dict:
             continue
         row = rows.get(rec["key"])
         if not row or not row.get("row_id"):
-            print(f"  Transaktion nicht in der Liste: {rec['merchant']} "
-                  f"{rec['amount']:.2f} € ({rec['date']}) – bleibt offen.")
-            result["not_found"] += 1
+            # Nicht ewig weiterversuchen: Wer geantwortet hat, soll irgendwann
+            # erfahren, dass die Transaktion endgültig weg ist.
+            _proposal_missing_seen(rec, jetzt)
+            grund = _proposal_give_up_reason(ts, rec, beantwortet=True, jetzt=jetzt)
+            if grund:
+                _retire_proposal(client, ts, rec, grund, jetzt, text=text)
+                result["retired"] += 1
+            else:
+                seit = _parse_iso(rec.get("nicht_gefunden_seit"))
+                tage = (jetzt - seit).days if seit else 0
+                print(f"  Transaktion nicht in der Liste: {rec['merchant']} "
+                      f"{rec['amount']:.2f} € ({rec['date']}) – seit {tage} Tag(en) "
+                      f"vermisst, abgelegt nach {MOSS_PROPOSAL_MISSING_DAYS}.")
+                result["not_found"] += 1
             continue
 
+        # Transaktion ist wieder da – eine frühere Vermisstmeldung zählt nicht
+        # weiter, sonst liefe die Frist über einen alten Aussetzer ab.
+        _proposal_missing_cleared(rec)
+
         outcome = _fill_buchungstext_only(page, row["row_id"], text)
+        if outcome == "gesperrt":
+            _retire_proposal(client, ts, rec, "gesperrt", jetzt, text=text)
+            result["locked"] += 1
+            continue
         if outcome == "error":
             print(f"  Eintragen fehlgeschlagen: {rec['merchant']} {rec['amount']:.2f} €")
             result["failed"] += 1
@@ -1639,7 +1996,8 @@ def apply_buchungstexte_from_slack(page) -> dict:
     _save_moss_proposals(store)
     print(f"Moss-Buchungstexte: {result['applied']} eingetragen, "
           f"{result['no_answer']} ohne Antwort, {result['not_found']} nicht gefunden, "
-          f"{result['failed']} fehlgeschlagen.")
+          f"{result['failed']} fehlgeschlagen, {result['retired']} abgelegt, "
+          f"{result['locked']} in Moss gesperrt.")
     return result
 
 
@@ -1691,7 +2049,7 @@ def sync_moss_open_invoices(page) -> dict:
               f"({uebergangen} mit vorhandenem oder ungültigem Beleg übergangen).")
 
     already_done = _load_moss_sent()
-    done, already, unmatched = [], [], []
+    done, already, unmatched, gesperrt = [], [], [], []
     phase1_proposals = []
 
     for row in rows:
@@ -1713,7 +2071,16 @@ def sync_moss_open_invoices(page) -> dict:
         # Beleg hochladen, aber Buchungstext NIE automatisch setzen –
         # stattdessen Vorschlag sammeln und zur Freigabe an Patrick schicken.
         print(f"  Lade {match.name} als Beleg hoch (Buchungstext wartet auf Freigabe).")
-        if _process_moss_transaction(page, row["row_id"], match, ""):
+        # Achtung: Rückgabe ist ein Zustand, kein Wahrheitswert – "gesperrt"
+        # wäre als Wahrheitswert ein Erfolg und der Beleg stillschweigend als
+        # hochgeladen vermerkt, obwohl Moss ihn nie angenommen hat.
+        ausgang = _process_moss_transaction(page, row["row_id"], match, "")
+        if ausgang == "gesperrt":
+            print(f"    In Moss gesperrt (exportiert?) – kein Upload möglich, "
+                  f"Handarbeit nötig.")
+            gesperrt.append(row)
+            continue
+        if ausgang == "ok":
             _save_moss_sent(match.name)
             # Auch im laufenden Durchgang sperren, damit dieselbe PDF nicht
             # zwei betragsgleichen Transaktionen zugeordnet wird.
@@ -1731,9 +2098,20 @@ def sync_moss_open_invoices(page) -> dict:
     # Entdoppelt und postet nur noch nicht offene/erledigte Vorschläge.
     _post_buchungstext_proposals(proposals)
 
-    print(f"Moss-Abgleich: {len(done)} hochgeladen, {applied.get('applied', 0)} Buchungstext(e) aus Slack eingetragen, {len(proposals)} Vorschlag/Vorschläge geprüft, {len(already)} bereits erledigt, {len(unmatched)} ohne lokalen Beleg.")
+    if gesperrt:
+        # Eigene Zeile im Protokoll: Diese Transaktionen sind nicht kaputt,
+        # sie brauchen Handarbeit in Moss. Vorher gingen sie in der
+        # Sammelzahl "ohne lokalen Beleg" unter.
+        print(f"Moss: {len(gesperrt)} Transaktion(en) in Moss gesperrt – dort ist "
+              f"Handarbeit nötig:")
+        for row in gesperrt:
+            datum = row["date"].strftime("%d.%m.%Y") if row["date"] else "?"
+            print(f"  🔒 {row['merchant']} {row['amount']:.2f} € ({datum})")
+
+    print(f"Moss-Abgleich: {len(done)} hochgeladen, {applied.get('applied', 0)} Buchungstext(e) aus Slack eingetragen, {len(proposals)} Vorschlag/Vorschläge geprüft, {len(already)} bereits erledigt, {len(unmatched)} ohne lokalen Beleg, {len(gesperrt)} in Moss gesperrt.")
     return {"sent": done, "already_sent": already, "unmatched": unmatched,
-            "texts_filled": applied.get("applied", 0), "proposals": proposals}
+            "locked": gesperrt, "texts_filled": applied.get("applied", 0),
+            "proposals": proposals}
 
 
 def main():

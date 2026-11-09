@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import json
+import logging
 import threading
 import subprocess
 from pathlib import Path
@@ -25,6 +26,84 @@ SETTINGS_FILE = BASE_DIR / "settings.json"
 PROVIDERS_FILE = BASE_DIR / "providers.json"
 
 
+# ── Protokoll ───────────────────────────────────────────────────────────────
+# Das Protokoll wuchs unbegrenzt (2,8 MB nach wenigen Wochen) und wurde an
+# rund zwanzig Stellen einzeln geöffnet – mal mit Zeitstempel, mal ohne.
+#
+# Gekürzt wird in der Datei selbst (Ende nach vorn kopieren, abschneiden),
+# NICHT durch Umbenennen wie bei logging.handlers.RotatingFileHandler:
+# launchd hält stdout und stderr des Dienstes mit O_APPEND auf genau dieser
+# Datei offen (nachgeprüft mit `lsof -p <pid> +fg`: FILE-FLAG "R,W,AP").
+# Nach einem Umbenennen schriebe launchd in die umbenannte Datei weiter, und
+# das Protokoll liefe an zwei Stellen auseinander. Weil launchd mit O_APPEND
+# schreibt, landet sein nächster Schreibvorgang nach dem Kürzen am neuen
+# Dateiende – es entsteht also keine Lücke.
+# 1 MB sind grob 10.000 Zeilen und damit mehrere komplette Läufe – genug, um
+# einem Fehler nachzugehen. Die Oberfläche zeigt ohnehin nur die letzten 200.
+LOG_MAX_BYTES = 2 * 1024 * 1024    # ab dieser Größe wird gekürzt
+LOG_KEEP_BYTES = 1024 * 1024       # so viel vom Ende bleibt stehen
+_log_lock = threading.Lock()
+
+
+def _kuerze_log() -> None:
+    """Behält nur das Ende des Protokolls. Aufrufer hält _log_lock."""
+    try:
+        with LOG_FILE.open("rb") as f:
+            f.seek(-LOG_KEEP_BYTES, os.SEEK_END)
+            schwanz = f.read()
+        # An der nächsten Zeilengrenze ansetzen, sonst beginnt das Protokoll
+        # mitten in einem Wort.
+        schnitt = schwanz.find(b"\n")
+        if schnitt != -1:
+            schwanz = schwanz[schnitt + 1:]
+        kopf = (f"=== Protokoll gekürzt {datetime.now():%d.%m.%Y %H:%M} – "
+                f"ältere Einträge entfernt ===\n").encode()
+        with LOG_FILE.open("r+b") as f:
+            f.write(kopf + schwanz)
+            f.truncate()
+    except OSError as e:
+        print(f"Protokoll konnte nicht gekürzt werden: {e}")
+
+
+def schreibe_log(text: str) -> None:
+    """Schreibt einen Eintrag ins Protokoll und kürzt es bei Bedarf.
+
+    Einzige Schreibstelle: vorher öffnete jeder Aufrufer die Datei selbst, und
+    niemand achtete auf die Größe.
+    """
+    if not text.strip():
+        # Leere Einträge (z.B. Ausgabe eines Prozesses, der nichts gesagt hat)
+        # erzeugten bisher Leerzeilen im Protokoll.
+        return
+    with _log_lock:
+        try:
+            with LOG_FILE.open("a") as f:
+                f.write(text.rstrip("\n") + "\n")
+            if LOG_FILE.stat().st_size > LOG_MAX_BYTES:
+                _kuerze_log()
+        except OSError as e:
+            # Bewusst print und nicht schreibe_log: Ein Fehler beim Schreiben
+            # darf nicht erneut ins Protokoll wollen. _log_lock ist nicht
+            # reentrant, ein Selbstaufruf endete hier in einem Deadlock.
+            print(f"Protokoll nicht schreibbar: {e}")
+
+
+class _NurAuffaelligeZugriffe(logging.Filter):
+    """Filtert Flasks Zugriffsprotokoll auf das Interessante.
+
+    Die Oberfläche fragt /api/status und /api/moss_listener im Sekundentakt ab;
+    jede dieser Abfragen stand als eigene Zeile im Protokoll und machte 23 %
+    davon aus (6.002 von 27.772 Zeilen). Erfolgreiche Abfragen sagen nichts –
+    Fehler schon, die bleiben drin.
+    """
+
+    def filter(self, record) -> bool:
+        return not re.search(r'" (2\d\d|304) ', record.getMessage())
+
+
+logging.getLogger("werkzeug").addFilter(_NurAuffaelligeZugriffe())
+
+
 def load_providers():
     gmail_configured = bool(os.getenv("GMAIL_EMAIL") and os.getenv("GMAIL_APP_PASSWORD"))
     builtin = [
@@ -42,6 +121,78 @@ def save_providers(providers):
     PROVIDERS_FILE.write_text(json.dumps(custom, indent=2, ensure_ascii=False))
 
 run_status = {"running": False, "log": [], "last_run": None, "last_count": 0, "last_new_count": 0}
+
+
+# ── Störungsmeldungen ───────────────────────────────────────────────────────
+# Ein fehlgeschlagener Lauf stand bisher nur in billbridge.log. Die Nachricht
+# selbst baut main.notify_failure (samt Cooldown); hier wird nur erkannt, DASS
+# etwas schiefging, und ein brauchbarer Hinweis mitgegeben.
+
+# Zeichenfolgen, die einen stillen Fehlschlag verraten: In diesen Fällen
+# beendet sich main.py trotzdem mit Code 0, der Lauf sieht also erfolgreich aus.
+STOERUNGS_MARKER = (
+    "Login-Timeout",
+    "Login fehlgeschlagen",
+    # Bewusst mit Ausrufezeichen: "Session abgelaufen, melde neu an..." ist die
+    # normale erneute Anmeldung und ausdrücklich keine Störung.
+    "Session abgelaufen!",
+    "Noch nicht eingeloggt",
+    "Fehlende Umgebungsvariablen",
+    "Traceback (most recent call last)",
+)
+
+HINWEIS_SESSION = ("In BillBridge (http://localhost:5757) beim Anbieter auf 🔑 klicken, "
+                   "im Fenster einloggen und „Session speichern“ drücken.")
+HINWEIS_MOSS = ("In BillBridge auf 🔑 bei Moss klicken, einloggen und das Fenster offen "
+                "lassen – nur solange es steht, kann BillBridge in Moss schreiben.")
+HINWEIS_GMAIL = ("Gmail-App-Passwort in BillBridge unter „Gmail“ prüfen – ein geändertes "
+                 "Google-Passwort macht alte App-Passwörter ungültig.")
+
+
+def _stoerung_in_ausgabe(zeilen):
+    """Erste Zeile der Ausgabe, die auf eine Störung hindeutet."""
+    for zeile in zeilen or []:
+        for marker in STOERUNGS_MARKER:
+            if marker in zeile:
+                return zeile.strip()
+    return None
+
+
+def _melde_stoerung(titel, details="", hinweis="", kennung=None, zeilen=None,
+                    cooldown_hours=None):
+    """Schickt eine Störungsmeldung nach Slack; eigene Fehler werden geschluckt,
+    damit eine kaputte Benachrichtigung nie einen Lauf abbricht."""
+    try:
+        from main import notify_failure
+        notify_failure(titel, details=details, hinweis=hinweis, kennung=kennung,
+                       auszug="\n".join((zeilen or [])[-12:]),
+                       cooldown_hours=cooldown_hours)
+    except Exception as e:
+        schreibe_log(f"[Störungsmeldung] fehlgeschlagen: {e}\n")
+
+
+def _entwarnung(kennung, titel):
+    """Meldet, dass eine zuvor gemeldete Störung behoben ist (sonst still)."""
+    try:
+        from main import notify_recovery
+        notify_recovery(kennung, titel)
+    except Exception as e:
+        schreibe_log(f"[Entwarnung] fehlgeschlagen: {e}\n")
+
+
+def _pruefe_lauf(kennung, titel, returncode=None, zeilen=None, hinweis=""):
+    """Nach einem Lauf: Störung melden oder – falls vorher eine gemeldet
+    wurde – Entwarnung geben. Gibt True zurück, wenn der Lauf sauber war."""
+    grund = _stoerung_in_ausgabe(zeilen)
+    if not grund and returncode:
+        grund = f"Der Lauf endete mit Fehlercode {returncode}."
+    if grund:
+        _melde_stoerung(f"{titel} fehlgeschlagen", details=grund, hinweis=hinweis,
+                        kennung=kennung, zeilen=zeilen)
+        return False
+    _entwarnung(kennung, titel)
+    return True
+
 
 # Laufende Login-Browser: provider_id → {"proc", "tmp_dir", "debug_port"}
 _session_browsers: dict = {}
@@ -275,8 +426,7 @@ def _run_gmail_sync():
 
     def _log(msg):
         run_status["log"].append(msg)
-        with LOG_FILE.open("a") as f:
-            f.write(msg + "\n")
+        schreibe_log(msg + "\n")
 
     _log(f"=== Gmail-Run ({datetime.now().isoformat()}) ===")
     count_before = len(get_invoices())
@@ -297,8 +447,13 @@ def _run_gmail_sync():
         run_status["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         run_status["last_count"] = len(get_invoices())
         run_status["last_new_count"] = run_status["last_count"] - count_before
+        _pruefe_lauf("run_gmail", "Gmail-Lauf", proc.returncode,
+                     run_status["log"], HINWEIS_GMAIL)
     except Exception as e:
         _log(f"Fehler: {e}")
+        _melde_stoerung("Gmail-Lauf fehlgeschlagen", details=str(e),
+                        hinweis=HINWEIS_GMAIL, kennung="run_gmail",
+                        zeilen=run_status["log"])
     finally:
         run_status["running"] = False
 
@@ -361,8 +516,7 @@ def _setup_session_sync(provider: dict):
 
     def _log(msg):
         run_status["log"].append(msg)
-        with LOG_FILE.open("a") as f:
-            f.write(msg + "\n")
+        schreibe_log(msg + "\n")
 
     _log(f"=== Session-Setup: {provider['name']} ({datetime.now().isoformat()}) ===")
 
@@ -443,8 +597,7 @@ def _save_session_sync(provider: dict):
 
     def _log(msg):
         run_status["log"].append(msg)
-        with LOG_FILE.open("a") as f:
-            f.write(msg + "\n")
+        schreibe_log(msg + "\n")
 
     _log(f"=== Session speichern: {provider['name']} ({datetime.now().isoformat()}) ===")
 
@@ -586,8 +739,7 @@ def _moss_reconcile_sync(provider: dict):
 
     def _log(msg):
         run_status["log"].append(msg)
-        with LOG_FILE.open("a") as f:
-            f.write(msg + "\n")
+        schreibe_log(msg + "\n")
 
     _log(f"=== Moss-Abgleich ({datetime.now().isoformat()}) ===")
 
@@ -668,8 +820,14 @@ with sync_playwright() as pw:
     # oder wenn die CDP-Verbindung wegbricht (_moss_apply_buchungstexte).
     if ok:
         _log("✅ Moss-Abgleich abgeschlossen.")
+        _entwarnung("moss_abgleich", "Moss-Abgleich")
     else:
         _log("❌ Moss-Abgleich fehlgeschlagen. Bitte erneut einloggen und versuchen.")
+        _melde_stoerung("Moss-Abgleich fehlgeschlagen",
+                        details=_stoerung_in_ausgabe(run_status["log"]) or
+                                "Der Abgleich wurde abgebrochen.",
+                        hinweis=HINWEIS_MOSS, kennung="moss_abgleich",
+                        zeilen=run_status["log"])
     _log("ℹ️ Login-Fenster bleibt offen – der Listener trägt damit alle 15 Min "
          "freigegebene Buchungstexte nach. Fenster einfach schließen, wenn du fertig bist.")
 
@@ -698,8 +856,7 @@ def _run_provider_sync(provider: dict, headless: bool = True):
 
     def _log(msg):
         run_status["log"].append(msg)
-        with LOG_FILE.open("a") as f:
-            f.write(msg + "\n")
+        schreibe_log(msg + "\n")
 
     # stdout umleiten damit print() aus main.py ins Log kommt
     class _Tee(io.TextIOBase):
@@ -732,10 +889,15 @@ def _run_provider_sync(provider: dict, headless: bool = True):
         run_status["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         run_status["last_count"] = len(get_invoices())
         run_status["last_new_count"] = len(files)
+        _pruefe_lauf(f"run_{provider['id']}", f"{provider['name']}-Lauf",
+                     None, run_status["log"], HINWEIS_SESSION)
     except Exception as e:
         import traceback
         _log(f"Fehler: {e}")
         _log(traceback.format_exc())
+        _melde_stoerung(f"{provider['name']}-Lauf fehlgeschlagen", details=str(e),
+                        hinweis=HINWEIS_SESSION, kennung=f"run_{provider['id']}",
+                        zeilen=run_status["log"])
     finally:
         sys.stdout = old_stdout
         run_status["running"] = False
@@ -786,18 +948,22 @@ def _run_sync(headless=True):
             args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, cwd=str(BASE_DIR)
         )
-        with LOG_FILE.open("a") as logf:
-            logf.write(f"\n=== Run {datetime.now().isoformat()} ===\n")
-            for line in proc.stdout:
-                line = line.rstrip()
-                run_status["log"].append(line)
-                logf.write(line + "\n")
+        schreibe_log(f"\n=== Run {datetime.now().isoformat()} ===")
+        for line in proc.stdout:
+            line = line.rstrip()
+            run_status["log"].append(line)
+            schreibe_log(line)
         proc.wait()
         run_status["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         run_status["last_count"] = len(get_invoices())
         run_status["last_new_count"] = run_status["last_count"] - count_before
+        _pruefe_lauf("run_amazon", "Amazon-Lauf", proc.returncode,
+                     run_status["log"], HINWEIS_SESSION)
     except Exception as e:
         run_status["log"].append(f"Fehler: {e}")
+        _melde_stoerung("Amazon-Lauf fehlgeschlagen", details=str(e),
+                        hinweis=HINWEIS_SESSION, kennung="run_amazon",
+                        zeilen=run_status["log"])
     finally:
         run_status["running"] = False
 
@@ -883,8 +1049,7 @@ def _moss_check_and_sync():
             if any(kw in text for kw in MOSS_TRIGGER_KEYWORDS):
                 triggered = True
                 moss_listener_status["last_trigger"] = datetime.now().strftime("%d.%m.%Y %H:%M")
-                with LOG_FILE.open("a") as f:
-                    f.write(f"\n[Moss-Listener] Trigger erkannt: {msg['text'][:120]}\n")
+                schreibe_log(f"\n[Moss-Listener] Trigger erkannt: {msg['text'][:120]}\n")
                 break
 
         _moss_save_last_ts(newest_ts)
@@ -895,14 +1060,12 @@ def _moss_check_and_sync():
         # Abkühlzeit: höchstens ein automatischer Sync pro Stunde
         last_sync = moss_listener_status.get("last_sync_epoch", 0)
         if _time.time() - last_sync < MOSS_SYNC_COOLDOWN_MIN * 60:
-            with LOG_FILE.open("a") as f:
-                f.write(f"[Moss-Listener] Trigger ignoriert (Abkühlzeit {MOSS_SYNC_COOLDOWN_MIN} Min).\n")
+            schreibe_log(f"[Moss-Listener] Trigger ignoriert (Abkühlzeit {MOSS_SYNC_COOLDOWN_MIN} Min).\n")
             return
         moss_listener_status["last_sync_epoch"] = _time.time()
 
         # Sync starten
-        with LOG_FILE.open("a") as f:
-            f.write(f"[Moss-Listener] Starte automatischen Sync ({datetime.now().isoformat()})\n")
+        schreibe_log(f"[Moss-Listener] Starte automatischen Sync ({datetime.now().isoformat()})\n")
 
         # Alle Provider synchronisieren
         providers = load_providers()
@@ -914,11 +1077,9 @@ def _moss_check_and_sync():
                 [sys.executable, str(BASE_DIR / "main.py")],
                 capture_output=True, text=True, cwd=str(BASE_DIR), timeout=300
             )
-            with LOG_FILE.open("a") as f:
-                f.write(proc.stdout[-2000:] if proc.stdout else "")
+            schreibe_log(proc.stdout[-2000:] if proc.stdout else "")
         except Exception as e:
-            with LOG_FILE.open("a") as f:
-                f.write(f"Amazon-Fehler: {e}\n")
+            schreibe_log(f"Amazon-Fehler: {e}\n")
 
         # Custom Provider (Galaxus etc.) – höchstens einmal pro Tag,
         # da z.B. Galaxus ein sichtbares Browser-Fenster öffnet.
@@ -927,8 +1088,7 @@ def _moss_check_and_sync():
             if not provider.get("custom"):
                 continue
             if _provider_ran_today(provider["id"]):
-                with LOG_FILE.open("a") as f:
-                    f.write(f"[Moss-Listener] {provider['id']} heute schon gelaufen, überspringe.\n")
+                schreibe_log(f"[Moss-Listener] {provider['id']} heute schon gelaufen, überspringe.\n")
                 continue
             try:
                 spec = importlib.util.spec_from_file_location("main", str(BASE_DIR / "main.py"))
@@ -940,8 +1100,7 @@ def _moss_check_and_sync():
                 if files:
                     mod.post_to_slack(files)
             except Exception as e:
-                with LOG_FILE.open("a") as f:
-                    f.write(f"Provider {provider['id']} Fehler: {e}\n")
+                schreibe_log(f"Provider {provider['id']} Fehler: {e}\n")
 
         # Gmail
         try:
@@ -953,8 +1112,7 @@ def _moss_check_and_sync():
             if gmail_files:
                 mod.post_to_slack(gmail_files)
         except Exception as e:
-            with LOG_FILE.open("a") as f:
-                f.write(f"Gmail-Fehler: {e}\n")
+            schreibe_log(f"Gmail-Fehler: {e}\n")
 
         # Antwort an Moss
         if all_files:
@@ -970,12 +1128,10 @@ def _moss_check_and_sync():
         try:
             user_client.chat_postMessage(channel=channel_id, text=reply)
         except SlackApiError as e:
-            with LOG_FILE.open("a") as f:
-                f.write(f"Moss-Antwort fehlgeschlagen: {e}\n")
+            schreibe_log(f"Moss-Antwort fehlgeschlagen: {e}\n")
 
     except Exception as e:
-        with LOG_FILE.open("a") as f:
-            f.write(f"[Moss-Listener] Fehler: {e}\n")
+        schreibe_log(f"[Moss-Listener] Fehler: {e}\n")
 
 
 MOSS_PROPOSALS_FILE = BASE_DIR / "moss_proposals.json"
@@ -1009,9 +1165,16 @@ def _moss_apply_buchungstexte():
         # Nur bei Zustandswechsel loggen, sonst läuft das Log alle 15 Min voll.
         if not moss_listener_status.get("apply_deferred"):
             moss_listener_status["apply_deferred"] = True
-            with LOG_FILE.open("a") as f:
-                f.write(f"[Moss-Listener] {open_count} Buchungstext-Vorschlag(e) offen, "
-                        f"aber kein Login-Browser offen – vertagt (🔑 Session einrichten).\n")
+            schreibe_log(f"[Moss-Listener] {open_count} Buchungstext-Vorschlag(e) offen, "
+                    f"aber kein Login-Browser offen – vertagt (🔑 Session einrichten).\n")
+        # Höchstens einmal am Tag melden: Ein geschlossenes Fenster ist der
+        # Normalfall, solange niemand antwortet – stumm bleiben darf es aber
+        # auch nicht, sonst warten freigegebene Texte wochenlang unbemerkt.
+        _melde_stoerung(
+            "Kein Moss-Fenster offen",
+            details=(f"{open_count} Buchungstext-Vorschlag/-Vorschläge sind offen. "
+                     f"Beantwortete Threads können gerade nicht in Moss eingetragen werden."),
+            hinweis=HINWEIS_MOSS, kennung="moss_fenster_fehlt", cooldown_hours=24)
         return
     moss_listener_status["apply_deferred"] = False
 
@@ -1061,10 +1224,25 @@ with sync_playwright() as pw:
         proc = subprocess.run([sys.executable, tmp_path], capture_output=True,
                               text=True, cwd=str(BASE_DIR), timeout=600)
         out = (proc.stdout or "") + (proc.stderr or "")
-        with LOG_FILE.open("a") as f:
-            f.write(f"[Moss-Listener] Buchungstext-Übernahme ({datetime.now().isoformat()}):\n")
-            f.write(out)
+        schreibe_log(f"[Moss-Listener] Buchungstext-Übernahme "
+                     f"({datetime.now().isoformat()}):\n{out}")
         moss_listener_status["last_apply"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+        zeilen = [z for z in out.splitlines() if z.strip()]
+        if "Buchungstext-Uebernahme fehlgeschlagen" in out:
+            _melde_stoerung("Buchungstexte konnten nicht eingetragen werden",
+                            details="Die Übernahme aus den Slack-Threads brach ab.",
+                            hinweis=HINWEIS_MOSS, kennung="moss_listener", zeilen=zeilen)
+        elif "Moss nicht eingeloggt" in out:
+            # Fenster steht, Session ist aber abgelaufen – das merkt sonst
+            # niemand, weil der Listener still weiter vertagt.
+            _melde_stoerung("Moss-Fenster ist nicht mehr eingeloggt",
+                            details="Das Login-Fenster steht offen, die Moss-Sitzung ist abgelaufen.",
+                            hinweis=HINWEIS_MOSS, kennung="moss_listener",
+                            zeilen=zeilen, cooldown_hours=24)
+        elif "CDP-Verbindung fehlgeschlagen" not in out:
+            # Sauber durchgelaufen: beide Störungen gelten als behoben.
+            _entwarnung("moss_listener", "Buchungstext-Übernahme")
+            _entwarnung("moss_fenster_fehlt", "Moss-Fenster")
         # Fenster von Hand geschlossen: Registrierung ist tot, sonst würde der
         # Listener bis in die Ewigkeit gegen einen leeren Debug-Port laufen.
         if "CDP-Verbindung fehlgeschlagen" in out:
@@ -1076,12 +1254,12 @@ with sync_playwright() as pw:
                 except Exception:
                     pass
                 _shutil.rmtree(stale.get("tmp_dir", ""), ignore_errors=True)
-            with LOG_FILE.open("a") as f:
-                f.write("[Moss-Listener] Login-Fenster nicht mehr erreichbar – "
-                        "Registrierung verworfen, warte auf neues 🔑 Session einrichten.\n")
+            schreibe_log("[Moss-Listener] Login-Fenster nicht mehr erreichbar – "
+                    "Registrierung verworfen, warte auf neues 🔑 Session einrichten.\n")
     except Exception as e:
-        with LOG_FILE.open("a") as f:
-            f.write(f"[Moss-Listener] Buchungstext-Übernahme Fehler: {e}\n")
+        schreibe_log(f"[Moss-Listener] Buchungstext-Übernahme Fehler: {e}\n")
+        _melde_stoerung("Buchungstexte konnten nicht eingetragen werden",
+                        details=str(e), hinweis=HINWEIS_MOSS, kennung="moss_listener")
     finally:
         Path(tmp_path).unlink(missing_ok=True)
     moss_listener_status["open_proposals"] = _open_proposal_count()
@@ -1099,8 +1277,7 @@ def _moss_listener_loop():
         try:
             _moss_apply_buchungstexte()
         except Exception as e:
-            with LOG_FILE.open("a") as f:
-                f.write(f"[Moss-Listener] Apply-Fehler: {e}\n")
+            schreibe_log(f"[Moss-Listener] Apply-Fehler: {e}\n")
         _time.sleep(900)  # 15 Minuten
 
 
