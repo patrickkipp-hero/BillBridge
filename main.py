@@ -906,6 +906,10 @@ def download_gmail_invoices() -> list[Path]:
     import email as _email
     import email.header
     import hashlib
+    from collections import Counter
+
+    # Übersprungene Anhänge nur zählen statt einzeln protokollieren.
+    uebersprungen: Counter = Counter()
 
     if not GMAIL_EMAIL or not GMAIL_APP_PASSWORD:
         print("Gmail: GMAIL_EMAIL und GMAIL_APP_PASSWORD nicht konfiguriert.")
@@ -976,7 +980,11 @@ def download_gmail_invoices() -> list[Path]:
             skip_keywords = ["agb", "widerrufs", "terms", "conditions", "datenschutz",
                              "privacy", "cancellation", "return_policy"]
             if any(kw in decoded.lower() for kw in skip_keywords):
-                print(f"  Überspringe (kein Rechnungs-PDF): {decoded}")
+                # Nicht je Anhang eine Zeile: Jede Bestellbestätigung bringt
+                # AGB und Widerrufsformular mit, bei jedem Lauf aufs Neue. Das
+                # waren 6.300 der 27.772 Zeilen im Protokoll. Am Ende steht
+                # stattdessen eine Summenzeile.
+                uebersprungen[decoded] += 1
                 continue
 
             payload = part.get_payload(decode=True)
@@ -1007,6 +1015,12 @@ def download_gmail_invoices() -> list[Path]:
             save_seen_order_id(dedup_key)
 
     mail.logout()
+    if uebersprungen:
+        beispiele = ", ".join(f"{name} ({n}x)" for name, n
+                              in uebersprungen.most_common(3))
+        print(f"Gmail: {sum(uebersprungen.values())} Anhang/Anhänge übersprungen "
+              f"(AGB, Widerrufsformular o.ä.): {beispiele}"
+              + (" …" if len(uebersprungen) > 3 else ""))
     print(f"Gmail: {len(downloaded)} neue Rechnung(en) heruntergeladen.")
     return downloaded
 

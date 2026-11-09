@@ -150,6 +150,29 @@ wieder, kommt eine Entwarnung. Standardziel ist `SLACK_CHANNEL_ID`,
 `SLACK_ALERT_CHANNEL_ID` lenkt die Meldungen woanders hin. Welche Störungen
 gerade offen sind, steht in `alerts_sent.json`.
 
+## Protokoll
+
+`billbridge.log` wuchs unbegrenzt – nach wenigen Wochen 1,9 MB und 27.772
+Zeilen. Jetzt wird bei 2 MB auf das letzte 1 MB gekürzt (`LOG_MAX_BYTES`,
+`LOG_KEEP_BYTES`).
+
+Gekürzt wird **in der Datei selbst**, nicht durch Umbenennen wie bei
+`logging.handlers.RotatingFileHandler`: Der LaunchAgent leitet stdout und
+stderr des Dienstes auf genau diese Datei um und hält sie mit `O_APPEND`
+offen (nachprüfbar mit `lsof -p <pid> +fg`, Flag `AP`). Nach einem Umbenennen
+schriebe launchd in die umbenannte Datei weiter und das Protokoll liefe an
+zwei Stellen auseinander. Weil launchd mit `O_APPEND` schreibt, landet sein
+nächster Eintrag nach dem Kürzen am neuen Dateiende – es entsteht keine Lücke.
+
+Zwei Drittel des Inhalts waren außerdem Lärm und fallen jetzt weg:
+
+* **6.300 Zeilen** „Überspringe (kein Rechnungs-PDF)" – jede
+  Bestellbestätigung bringt AGB und Widerrufsformular mit, bei jedem Lauf
+  aufs Neue. Statt einer Zeile je Anhang steht am Ende eine Summenzeile.
+* **6.002 Zeilen** Flask-Zugriffsprotokoll (23 %) – die Oberfläche fragt
+  `/api/status` im Sekundentakt ab. Erfolgreiche Abfragen werden gefiltert,
+  Fehler (404, 500) bleiben drin.
+
 ## Buchungstext-Vorschläge: Lebenszyklus
 
 Ein Vorschlag wird in den Slack-Thread gepostet und wartet dort auf eine
@@ -202,6 +225,7 @@ deshalb auch mit einem Python, das die Abhängigkeiten nicht hat – anders als
 | `test_slack_antwort.py` | Säubern der Thread-Antworten: HTML-Entitäten, Aufzählungen, Mengenangaben |
 | `test_stoerungsmeldung.py` | Cooldown, Entwarnung, Verhalten ohne Token und bei Slack-Ausfall |
 | `test_vorschlag_lebenszyklus.py` | Fristen zum Ablegen, Zurücksetzen bei wiedergefundener Transaktion, Hinweis im Thread |
+| `test_protokoll.py` | Kürzen in derselben Datei (Inode), Zeilengrenzen, Filter fürs Zugriffsprotokoll |
 
 ## Projektstruktur
 
