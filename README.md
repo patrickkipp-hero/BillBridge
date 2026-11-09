@@ -12,6 +12,7 @@ Rechnungen automatisch von Amazon Business und Galaxus herunterladen und per Sla
 - **Slack-Integration**: PDFs direkt in einen Channel oder als DM an eine App (z.B. Moss) senden
 - **Web-UI**: Übersicht, manuelle Ausführung, Einstellungen – erreichbar unter `http://localhost:5757`
 - **Automatischer Tagesrun**: Per macOS LaunchAgent täglich um 10 Uhr (konfigurierbar)
+- **Störungsmeldungen**: Abgebrochene Läufe und abgelaufene Sessions melden sich selbst in Slack, statt still im Log zu landen
 
 ## Voraussetzungen
 
@@ -131,6 +132,23 @@ BillBridge läuft täglich um 10 Uhr via LaunchAgent. Einmalig aktivieren:
 cp de.hero-software.billbridge.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/de.hero-software.billbridge.plist
 ```
+
+## Störungsmeldungen
+
+Fehler landeten früher nur in `billbridge.log` – ein Lauf gegen eine abgelaufene
+Session sah in der Oberfläche aus wie ein normaler Lauf ohne neue Rechnungen.
+Jetzt meldet BillBridge solche Störungen zusätzlich in Slack, mit Hinweis, was
+zu tun ist:
+
+- fehlgeschlagener Amazon-, Gmail- oder Anbieter-Lauf
+- abgebrochener Moss-Abgleich
+- Moss-Fenster geschlossen oder nicht mehr eingeloggt, während Buchungstexte warten
+
+Dieselbe Störung wird höchstens alle 6 Stunden gemeldet (`ALERT_COOLDOWN_HOURS`);
+wie oft sie zwischendurch auftrat, steht in der nächsten Nachricht. Läuft es
+wieder, kommt eine Entwarnung. Standardziel ist `SLACK_CHANNEL_ID`,
+`SLACK_ALERT_CHANNEL_ID` lenkt die Meldungen woanders hin. Welche Störungen
+gerade offen sind, steht in `alerts_sent.json`.
 
 ## Projektstruktur
 

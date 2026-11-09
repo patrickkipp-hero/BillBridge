@@ -43,6 +43,80 @@ def save_providers(providers):
 
 run_status = {"running": False, "log": [], "last_run": None, "last_count": 0, "last_new_count": 0}
 
+
+# ── Störungsmeldungen ───────────────────────────────────────────────────────
+# Ein fehlgeschlagener Lauf stand bisher nur in billbridge.log. Die Nachricht
+# selbst baut main.notify_failure (samt Cooldown); hier wird nur erkannt, DASS
+# etwas schiefging, und ein brauchbarer Hinweis mitgegeben.
+
+# Zeichenfolgen, die einen stillen Fehlschlag verraten: In diesen Fällen
+# beendet sich main.py trotzdem mit Code 0, der Lauf sieht also erfolgreich aus.
+STOERUNGS_MARKER = (
+    "Login-Timeout",
+    "Login fehlgeschlagen",
+    # Bewusst mit Ausrufezeichen: "Session abgelaufen, melde neu an..." ist die
+    # normale erneute Anmeldung und ausdrücklich keine Störung.
+    "Session abgelaufen!",
+    "Noch nicht eingeloggt",
+    "Fehlende Umgebungsvariablen",
+    "Traceback (most recent call last)",
+)
+
+HINWEIS_SESSION = ("In BillBridge (http://localhost:5757) beim Anbieter auf 🔑 klicken, "
+                   "im Fenster einloggen und „Session speichern“ drücken.")
+HINWEIS_MOSS = ("In BillBridge auf 🔑 bei Moss klicken, einloggen und das Fenster offen "
+                "lassen – nur solange es steht, kann BillBridge in Moss schreiben.")
+HINWEIS_GMAIL = ("Gmail-App-Passwort in BillBridge unter „Gmail“ prüfen – ein geändertes "
+                 "Google-Passwort macht alte App-Passwörter ungültig.")
+
+
+def _stoerung_in_ausgabe(zeilen):
+    """Erste Zeile der Ausgabe, die auf eine Störung hindeutet."""
+    for zeile in zeilen or []:
+        for marker in STOERUNGS_MARKER:
+            if marker in zeile:
+                return zeile.strip()
+    return None
+
+
+def _melde_stoerung(titel, details="", hinweis="", kennung=None, zeilen=None,
+                    cooldown_hours=None):
+    """Schickt eine Störungsmeldung nach Slack; eigene Fehler werden geschluckt,
+    damit eine kaputte Benachrichtigung nie einen Lauf abbricht."""
+    try:
+        from main import notify_failure
+        notify_failure(titel, details=details, hinweis=hinweis, kennung=kennung,
+                       auszug="\n".join((zeilen or [])[-12:]),
+                       cooldown_hours=cooldown_hours)
+    except Exception as e:
+        with LOG_FILE.open("a") as f:
+            f.write(f"[Störungsmeldung] fehlgeschlagen: {e}\n")
+
+
+def _entwarnung(kennung, titel):
+    """Meldet, dass eine zuvor gemeldete Störung behoben ist (sonst still)."""
+    try:
+        from main import notify_recovery
+        notify_recovery(kennung, titel)
+    except Exception as e:
+        with LOG_FILE.open("a") as f:
+            f.write(f"[Entwarnung] fehlgeschlagen: {e}\n")
+
+
+def _pruefe_lauf(kennung, titel, returncode=None, zeilen=None, hinweis=""):
+    """Nach einem Lauf: Störung melden oder – falls vorher eine gemeldet
+    wurde – Entwarnung geben. Gibt True zurück, wenn der Lauf sauber war."""
+    grund = _stoerung_in_ausgabe(zeilen)
+    if not grund and returncode:
+        grund = f"Der Lauf endete mit Fehlercode {returncode}."
+    if grund:
+        _melde_stoerung(f"{titel} fehlgeschlagen", details=grund, hinweis=hinweis,
+                        kennung=kennung, zeilen=zeilen)
+        return False
+    _entwarnung(kennung, titel)
+    return True
+
+
 # Laufende Login-Browser: provider_id → {"proc", "tmp_dir", "debug_port"}
 _session_browsers: dict = {}
 
@@ -297,8 +371,13 @@ def _run_gmail_sync():
         run_status["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         run_status["last_count"] = len(get_invoices())
         run_status["last_new_count"] = run_status["last_count"] - count_before
+        _pruefe_lauf("run_gmail", "Gmail-Lauf", proc.returncode,
+                     run_status["log"], HINWEIS_GMAIL)
     except Exception as e:
         _log(f"Fehler: {e}")
+        _melde_stoerung("Gmail-Lauf fehlgeschlagen", details=str(e),
+                        hinweis=HINWEIS_GMAIL, kennung="run_gmail",
+                        zeilen=run_status["log"])
     finally:
         run_status["running"] = False
 
@@ -668,8 +747,14 @@ with sync_playwright() as pw:
     # oder wenn die CDP-Verbindung wegbricht (_moss_apply_buchungstexte).
     if ok:
         _log("✅ Moss-Abgleich abgeschlossen.")
+        _entwarnung("moss_abgleich", "Moss-Abgleich")
     else:
         _log("❌ Moss-Abgleich fehlgeschlagen. Bitte erneut einloggen und versuchen.")
+        _melde_stoerung("Moss-Abgleich fehlgeschlagen",
+                        details=_stoerung_in_ausgabe(run_status["log"]) or
+                                "Der Abgleich wurde abgebrochen.",
+                        hinweis=HINWEIS_MOSS, kennung="moss_abgleich",
+                        zeilen=run_status["log"])
     _log("ℹ️ Login-Fenster bleibt offen – der Listener trägt damit alle 15 Min "
          "freigegebene Buchungstexte nach. Fenster einfach schließen, wenn du fertig bist.")
 
@@ -732,10 +817,15 @@ def _run_provider_sync(provider: dict, headless: bool = True):
         run_status["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         run_status["last_count"] = len(get_invoices())
         run_status["last_new_count"] = len(files)
+        _pruefe_lauf(f"run_{provider['id']}", f"{provider['name']}-Lauf",
+                     None, run_status["log"], HINWEIS_SESSION)
     except Exception as e:
         import traceback
         _log(f"Fehler: {e}")
         _log(traceback.format_exc())
+        _melde_stoerung(f"{provider['name']}-Lauf fehlgeschlagen", details=str(e),
+                        hinweis=HINWEIS_SESSION, kennung=f"run_{provider['id']}",
+                        zeilen=run_status["log"])
     finally:
         sys.stdout = old_stdout
         run_status["running"] = False
@@ -796,8 +886,13 @@ def _run_sync(headless=True):
         run_status["last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         run_status["last_count"] = len(get_invoices())
         run_status["last_new_count"] = run_status["last_count"] - count_before
+        _pruefe_lauf("run_amazon", "Amazon-Lauf", proc.returncode,
+                     run_status["log"], HINWEIS_SESSION)
     except Exception as e:
         run_status["log"].append(f"Fehler: {e}")
+        _melde_stoerung("Amazon-Lauf fehlgeschlagen", details=str(e),
+                        hinweis=HINWEIS_SESSION, kennung="run_amazon",
+                        zeilen=run_status["log"])
     finally:
         run_status["running"] = False
 
@@ -1012,6 +1107,14 @@ def _moss_apply_buchungstexte():
             with LOG_FILE.open("a") as f:
                 f.write(f"[Moss-Listener] {open_count} Buchungstext-Vorschlag(e) offen, "
                         f"aber kein Login-Browser offen – vertagt (🔑 Session einrichten).\n")
+        # Höchstens einmal am Tag melden: Ein geschlossenes Fenster ist der
+        # Normalfall, solange niemand antwortet – stumm bleiben darf es aber
+        # auch nicht, sonst warten freigegebene Texte wochenlang unbemerkt.
+        _melde_stoerung(
+            "Kein Moss-Fenster offen",
+            details=(f"{open_count} Buchungstext-Vorschlag/-Vorschläge sind offen. "
+                     f"Beantwortete Threads können gerade nicht in Moss eingetragen werden."),
+            hinweis=HINWEIS_MOSS, kennung="moss_fenster_fehlt", cooldown_hours=24)
         return
     moss_listener_status["apply_deferred"] = False
 
@@ -1065,6 +1168,22 @@ with sync_playwright() as pw:
             f.write(f"[Moss-Listener] Buchungstext-Übernahme ({datetime.now().isoformat()}):\n")
             f.write(out)
         moss_listener_status["last_apply"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+        zeilen = [z for z in out.splitlines() if z.strip()]
+        if "Buchungstext-Uebernahme fehlgeschlagen" in out:
+            _melde_stoerung("Buchungstexte konnten nicht eingetragen werden",
+                            details="Die Übernahme aus den Slack-Threads brach ab.",
+                            hinweis=HINWEIS_MOSS, kennung="moss_listener", zeilen=zeilen)
+        elif "Moss nicht eingeloggt" in out:
+            # Fenster steht, Session ist aber abgelaufen – das merkt sonst
+            # niemand, weil der Listener still weiter vertagt.
+            _melde_stoerung("Moss-Fenster ist nicht mehr eingeloggt",
+                            details="Das Login-Fenster steht offen, die Moss-Sitzung ist abgelaufen.",
+                            hinweis=HINWEIS_MOSS, kennung="moss_listener",
+                            zeilen=zeilen, cooldown_hours=24)
+        elif "CDP-Verbindung fehlgeschlagen" not in out:
+            # Sauber durchgelaufen: beide Störungen gelten als behoben.
+            _entwarnung("moss_listener", "Buchungstext-Übernahme")
+            _entwarnung("moss_fenster_fehlt", "Moss-Fenster")
         # Fenster von Hand geschlossen: Registrierung ist tot, sonst würde der
         # Listener bis in die Ewigkeit gegen einen leeren Debug-Port laufen.
         if "CDP-Verbindung fehlgeschlagen" in out:
@@ -1082,6 +1201,8 @@ with sync_playwright() as pw:
     except Exception as e:
         with LOG_FILE.open("a") as f:
             f.write(f"[Moss-Listener] Buchungstext-Übernahme Fehler: {e}\n")
+        _melde_stoerung("Buchungstexte konnten nicht eingetragen werden",
+                        details=str(e), hinweis=HINWEIS_MOSS, kennung="moss_listener")
     finally:
         Path(tmp_path).unlink(missing_ok=True)
     moss_listener_status["open_proposals"] = _open_proposal_count()

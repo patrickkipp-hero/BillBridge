@@ -52,6 +52,144 @@ def check_config():
         sys.exit(1)
 
 
+# ── Störungsmeldungen nach Slack ─────────────────────────────────────────────
+# Fehler landeten bisher ausschließlich in billbridge.log. Ein stiller Lauf
+# (abgelaufene Amazon-Session, ausgeloggtes Moss) sah in der Oberfläche aus wie
+# ein normaler Lauf ohne neue Rechnungen – gemerkt hat man es erst Tage später.
+# Deshalb geht jede Störung zusätzlich als Nachricht in den Slack-Kanal.
+#
+# Ziel ist standardmäßig derselbe Kanal wie die Rechnungen (bei einer
+# Installation pro Person also der persönliche Kanal). SLACK_ALERT_CHANNEL_ID
+# lenkt die Meldungen bei Bedarf woanders hin.
+
+ALERT_STATE_FILE = Path("alerts_sent.json")
+ALERT_COOLDOWN_HOURS = float(os.getenv("ALERT_COOLDOWN_HOURS", "6"))
+
+
+def _alert_channel() -> Optional[str]:
+    # Bewusst bei jedem Aufruf aus der Umgebung lesen statt beim Import:
+    # Die Oberfläche schreibt .env zur Laufzeit neu.
+    return os.getenv("SLACK_ALERT_CHANNEL_ID") or os.getenv("SLACK_CHANNEL_ID")
+
+
+def _load_alert_state() -> dict:
+    try:
+        return json.loads(ALERT_STATE_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_alert_state(state: dict) -> None:
+    try:
+        ALERT_STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    except OSError as e:
+        print(f"    Störungsspeicher nicht schreibbar: {e}")
+
+
+def _alert_text(titel: str, details: str, hinweis: str, auszug: str,
+                unterdrueckt: int, seit: Optional[str]) -> str:
+    zeilen = [f":warning: *BillBridge: {titel}*"]
+    if details:
+        zeilen.append(details)
+    if unterdrueckt:
+        wann = f" seit {seit}" if seit else ""
+        zeilen.append(f"_Trat seitdem {unterdrueckt}× weiter auf{wann}, "
+                      f"ohne jedes Mal gemeldet zu werden._")
+    if hinweis:
+        zeilen.append(f"*Was zu tun ist:* {hinweis}")
+    if auszug:
+        zeilen.append(f"```{auszug.strip()}```")
+    return "\n".join(zeilen)
+
+
+def notify_failure(titel: str, details: str = "", hinweis: str = "",
+                   kennung: Optional[str] = None, auszug: str = "",
+                   cooldown_hours: Optional[float] = None) -> bool:
+    """Meldet eine Störung in den Slack-Kanal. Gibt True zurück, wenn wirklich
+    gesendet wurde.
+
+    Dieselbe Störung wird höchstens alle ALERT_COOLDOWN_HOURS Stunden gemeldet
+    – ein täglicher Lauf gegen eine tote Session würde den Kanal sonst
+    zumüllen. Wie oft sie zwischendurch auftrat, steht in der nächsten
+    Nachricht. Diese Funktion wirft nie: eine kaputte Benachrichtigung darf
+    keinen Lauf abbrechen.
+    """
+    kennung = kennung or titel
+    jetzt = datetime.now()
+    state = _load_alert_state()
+    eintrag = state.get(kennung) or {}
+
+    letzte = eintrag.get("zuletzt")
+    if letzte:
+        try:
+            vergangen = (jetzt - datetime.fromisoformat(letzte)).total_seconds() / 3600
+        except ValueError:
+            vergangen = None
+        grenze = ALERT_COOLDOWN_HOURS if cooldown_hours is None else cooldown_hours
+        if vergangen is not None and vergangen < grenze:
+            eintrag["unterdrueckt"] = eintrag.get("unterdrueckt", 0) + 1
+            state[kennung] = eintrag
+            _save_alert_state(state)
+            print(f"    Störung '{kennung}' bereits vor {vergangen:.1f} h gemeldet "
+                  f"– keine zweite Nachricht.")
+            return False
+
+    channel = _alert_channel()
+    token = os.getenv("SLACK_BOT_TOKEN")
+    if not channel or not token:
+        print(f"    Störung '{kennung}' nicht meldbar: Slack-Kanal oder Token fehlt.")
+        return False
+
+    text = _alert_text(titel, details, hinweis, auszug,
+                       eintrag.get("unterdrueckt", 0), eintrag.get("seit"))
+    try:
+        from slack_sdk import WebClient
+        WebClient(token=token).chat_postMessage(channel=channel, text=text)
+    except Exception as e:
+        # Slack unerreichbar: ins Log, aber den Lauf nicht beeinflussen.
+        print(f"    Störungsmeldung konnte nicht gesendet werden: {e}")
+        return False
+
+    state[kennung] = {"seit": eintrag.get("seit") or jetzt.isoformat(timespec="seconds"),
+                      "zuletzt": jetzt.isoformat(timespec="seconds"),
+                      "unterdrueckt": 0,
+                      "titel": titel}
+    _save_alert_state(state)
+    print(f"    Störung '{kennung}' nach Slack gemeldet.")
+    return True
+
+
+def notify_recovery(kennung: str, titel: str) -> bool:
+    """Entwarnung, nachdem eine gemeldete Störung behoben ist.
+
+    Wird nur gesendet, wenn vorher tatsächlich eine Störung gemeldet wurde –
+    sonst käme nach jedem erfolgreichen Lauf eine Nachricht. Räumt den
+    Störungsspeicher auf, damit die nächste Störung sofort wieder meldet statt
+    in den Cooldown zu laufen.
+    """
+    state = _load_alert_state()
+    eintrag = state.pop(kennung, None)
+    if not eintrag:
+        return False
+    _save_alert_state(state)
+
+    channel = _alert_channel()
+    token = os.getenv("SLACK_BOT_TOKEN")
+    if not channel or not token:
+        return False
+    seit = eintrag.get("seit", "")
+    text = f":white_check_mark: *BillBridge: {titel} läuft wieder.*"
+    if seit:
+        text += f"\n_Gestört seit {seit}._"
+    try:
+        from slack_sdk import WebClient
+        WebClient(token=token).chat_postMessage(channel=channel, text=text)
+    except Exception as e:
+        print(f"    Entwarnung konnte nicht gesendet werden: {e}")
+        return False
+    return True
+
+
 def _amazon_do_login(page, PwTimeout) -> bool:
     """Führt den Amazon-Login-Flow durch. Gibt True zurück wenn erfolgreich."""
     def _is_on_login_page():
