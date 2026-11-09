@@ -9,14 +9,17 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180x180.png">
 <style>
-  /* ═══ BillBridge · Swiss Minimal Dark ═══════════════════════════════════
+  /* ═══ BillBridge · Swiss Minimal ════════════════════════════════════════
      Weniger, aber präziser: ein Flächenton, eine Akzentfarbe, viel Ruhe.
      Bewegung trägt Bedeutung (Herkunft, Fortschritt, Zustand) statt Dekor
      und schaltet sich bei prefers-reduced-motion vollständig ab.          */
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+  /* Dunkel ist die Grundpalette; die helle steht direkt darunter und greift,
+     sobald das System auf „Hell" steht (prefers-color-scheme).            */
   :root {
+    color-scheme: dark;
     /* Flächen */
     --bg:          #09090B;
     --surface:     #121215;
@@ -61,6 +64,77 @@
 
     --shadow:    0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
     --shadow-lg: 0 24px 60px -20px rgba(0,0,0,.8);
+
+    /* Einzelwerte, die je Palette kippen müssen */
+    --accent-strong: var(--accent);      /* Akzent als Text, Linie, Fokusring */
+    --hover-line:    #33333B;
+    --surface-hover: #2E2E36;
+    --placeholder:   #5A5A66;
+    --knob:          #6B6B78;
+    --topbar-bg:     rgba(9,9,11,.72);
+    --ripple-soft:   rgba(255,255,255,.16);
+    --log-bg:        #050506;
+    --log-info:      #7DB8FF;
+    --overlay:       rgba(0,0,0,.66);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      color-scheme: light;
+      --bg:          #FFFFFF;
+      --surface:     #FFFFFF;
+      --surface-2:   #FAFAFA;
+      --surface-3:   #F4F4F5;
+      --border:      #E4E4E7;
+      --border-soft: #E4E4E7;
+
+      /* Text – alle ≥ 4.5:1 auf Weiß */
+      --text:        #1A1A1A;
+      --text-dim:    #3F3F46;
+      --text-muted:  #71717A;
+
+      /* Der Akzent trägt auf Weiß keinen Text: dafür eine abgedunkelte Fassung,
+         die der gewählten Akzentfarbe folgt (Gelb → dunkles Bernstein). */
+      --accent-strong: #806A00;
+      --accent-strong: color-mix(in srgb, var(--accent) 50%, #000);
+
+      --green: #15803D;  --green-bg: #DCFCE7;
+      --red:   #B91C1C;  --red-bg:   #FEE2E2;
+      --yellow:#A16207;  --yellow-bg:#FEF9C3;
+
+      --shadow:    0 1px 2px rgba(0,0,0,.06), 0 8px 24px -12px rgba(0,0,0,.12);
+      --shadow-lg: 0 24px 60px -20px rgba(0,0,0,.25);
+
+      --hover-line:    #D4D4D8;
+      --surface-hover: #E4E4E7;
+      --placeholder:   #8A8A94;
+      --knob:          #A1A1AA;
+      --topbar-bg:     rgba(255,255,255,.8);
+      --ripple-soft:   rgba(0,0,0,.1);
+      --log-bg:        #FAFAFA;
+      --log-info:      #1D4ED8;
+      --overlay:       rgba(0,0,0,.4);
+    }
+    /* Die Seitenleiste bleibt in beiden Paletten dunkel */
+    .sidebar {
+      color-scheme: dark;
+      color: #FAFAFA;
+      --surface:     #121215;
+      --surface-2:   #1A1A1F;
+      --surface-3:   #232329;
+      --border:      #26262C;
+      --border-soft: #1C1C21;
+      --text:        #FAFAFA;
+      --text-dim:    #C4C4CC;
+      --text-muted:  #92929E;
+      --accent-strong: var(--accent);
+      --green: #3DDC97;  --green-bg: rgba(61, 220, 151, 0.12);
+      --red:   #FF6B6B;  --red-bg:   rgba(255, 107, 107, 0.12);
+      --yellow:#FFC53D;  --yellow-bg:rgba(255, 197, 61, 0.12);
+      --hover-line:    #33333B;
+      --surface-hover: #2E2E36;
+      --placeholder:   #5A5A66;
+    }
   }
 
   html, body {
@@ -81,11 +155,11 @@
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 8px; border: 3px solid var(--bg); }
-  ::-webkit-scrollbar-thumb:hover { background: #33333B; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--hover-line); }
 
   /* Sichtbarer Fokus für Tastaturbedienung – nie entfernen */
   :focus-visible {
-    outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px;
+    outline: 2px solid var(--accent-strong); outline-offset: 2px; border-radius: 4px;
   }
 
   /* ── Layout ──────────────────────────────────────────────────────────── */
@@ -125,8 +199,8 @@
     background: none; border: none; outline: none; color: var(--text);
     font-size: 13px; font-family: var(--font); width: 100%;
   }
-  .sidebar-search input::placeholder { color: #5A5A66; }
-  .search-icon { color: #5A5A66; display: flex; flex-shrink: 0; }
+  .sidebar-search input::placeholder { color: var(--placeholder); }
+  .search-icon { color: var(--placeholder); display: flex; flex-shrink: 0; }
   .search-shortcut {
     background: var(--surface-3); border-radius: 5px; padding: 2px 6px;
     font-size: 10px; font-family: var(--mono); color: var(--text-muted); flex-shrink: 0;
@@ -134,7 +208,7 @@
 
   .sidebar-section { padding: 0 12px; }
   .sidebar-section-label {
-    font-size: 10px; color: #5A5A66; letter-spacing: .13em;
+    font-size: 10px; color: var(--placeholder); letter-spacing: .13em;
     text-transform: uppercase; padding: 16px 8px 7px; font-weight: 600;
   }
 
@@ -185,7 +259,7 @@
 
   .topbar {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 32px; background: rgba(9,9,11,.72);
+    padding: 16px 32px; background: var(--topbar-bg);
     backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
     border-bottom: 1px solid var(--border-soft);
     position: sticky; top: 0; z-index: 10;
@@ -208,9 +282,9 @@
   .btn-primary { background: var(--accent); color: var(--accent-ink); }
   .btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, #fff); }
   .btn-secondary { background: var(--surface-3); color: var(--text); }
-  .btn-secondary:hover:not(:disabled) { background: #2E2E36; }
+  .btn-secondary:hover:not(:disabled) { background: var(--surface-hover); }
   .btn-ghost { background: transparent; color: var(--text-dim); border-color: var(--border); }
-  .btn-ghost:hover:not(:disabled) { background: var(--surface-2); border-color: #33333B; }
+  .btn-ghost:hover:not(:disabled) { background: var(--surface-2); border-color: var(--hover-line); }
   .btn-danger { background: transparent; color: var(--red); border: none; padding: 0; min-height: 0; font-size: 13px; font-weight: 600; }
   .btn-danger:hover { text-decoration: underline; }
   /* Druckwelle: bestätigt den Klick, bevor die Antwort da ist */
@@ -219,7 +293,7 @@
     background: rgba(0,0,0,.22); pointer-events: none;
     animation: ripple 560ms var(--ease-out) forwards;
   }
-  .btn-secondary .ripple, .btn-ghost .ripple { background: rgba(255,255,255,.16); }
+  .btn-secondary .ripple, .btn-ghost .ripple { background: var(--ripple-soft); }
   @keyframes ripple { to { transform: scale(2.6); opacity: 0; } }
 
   .ico { width: 15px; height: 15px; flex-shrink: 0; }
@@ -242,7 +316,7 @@
     font-size: 30px; font-weight: 800; letter-spacing: -.03em; margin-bottom: 6px;
   }
   .greeting-sub { font-size: 13.5px; color: var(--text-muted); margin-bottom: 30px; line-height: 1.6; }
-  .greeting-sub a { color: var(--accent); text-decoration: none; font-weight: 600; border-bottom: 1px solid var(--accent-dim); }
+  .greeting-sub a { color: var(--accent-strong); text-decoration: none; font-weight: 600; border-bottom: 1px solid var(--accent-dim); }
 
   .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; margin-bottom: 26px; }
   @media (min-width: 1180px) { .stats-grid { grid-template-columns: repeat(4, minmax(0,1fr)); } }
@@ -262,7 +336,7 @@
   .stat-label { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .1em; font-weight: 600; margin-bottom: 10px; }
   .stat-value { font-size: 32px; font-weight: 800; line-height: 1; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
   .stat-sub   { font-size: 11.5px; color: var(--text-muted); margin-top: 7px; }
-  .stat-yellow { color: var(--accent); }
+  .stat-yellow { color: var(--accent-strong); }
 
   .two-col { display: grid; grid-template-columns: minmax(0,1fr) 336px; gap: 18px; align-items: start; }
 
@@ -318,7 +392,7 @@
     transition: border-color var(--fast), background var(--fast), transform var(--fast) var(--ease);
   }
   .invoice-item:hover { border-color: var(--border); transform: translateX(3px); }
-  .invoice-item.active { border-color: var(--accent); background: var(--accent-soft); }
+  .invoice-item.active { border-color: var(--accent-strong); background: var(--accent-soft); }
   .invoice-icon { font-size: 20px; flex-shrink: 0; opacity: .85; }
   .invoice-name { font-size: 12.5px; font-weight: 600; word-break: break-all; line-height: 1.35; }
   .invoice-meta { font-size: 11px; color: var(--text-muted); margin-top: 3px; font-family: var(--mono); }
@@ -367,8 +441,8 @@
     background: var(--surface-2); color: var(--text); outline: none;
     transition: border-color var(--fast), background var(--fast), box-shadow var(--fast);
   }
-  .form-input::placeholder { color: #5A5A66; }
-  .form-input:focus { border-color: var(--accent); background: var(--surface-3); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .form-input::placeholder { color: var(--placeholder); }
+  .form-input:focus { border-color: var(--accent-strong); background: var(--surface-3); box-shadow: 0 0 0 3px var(--accent-glow); }
   .form-input.mono { font-family: var(--mono); font-size: 12px; }
   select.form-input {
     appearance: none; padding-right: 34px; cursor: pointer;
@@ -399,7 +473,7 @@
     background: var(--surface-2); color: var(--text);
     outline: none; width: 124px; transition: border-color var(--fast), box-shadow var(--fast);
   }
-  .time-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .time-input:focus { border-color: var(--accent-strong); box-shadow: 0 0 0 3px var(--accent-glow); }
 
   .rule-item {
     display: flex; align-items: flex-start; justify-content: space-between;
@@ -418,12 +492,12 @@
   }
   .slider:before {
     content: ""; position: absolute; height: 21px; width: 21px;
-    left: 3px; bottom: 3px; background: #6B6B78; border-radius: 50%;
+    left: 3px; bottom: 3px; background: var(--knob); border-radius: 50%;
     transition: transform var(--base) var(--ease), background var(--base);
   }
   input:checked + .slider { background: var(--accent); }
   input:checked + .slider:before { transform: translateX(19px); background: var(--accent-ink); }
-  .switch input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .switch input:focus-visible + .slider { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
 
   /* ── Einstellungen ───────────────────────────────────────────────────── */
   .settings-row {
@@ -454,14 +528,14 @@
 
   /* ── Log ─────────────────────────────────────────────────────────────── */
   .log-box {
-    background: #050506; color: var(--text-dim);
+    background: var(--log-bg); color: var(--text-dim);
     border: 1px solid var(--border-soft); border-radius: var(--radius);
     padding: 18px; font-family: var(--mono); font-size: 12px; line-height: 1.65;
     height: 420px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
   }
   .log-box .log-ok   { color: var(--green); }
   .log-box .log-err  { color: var(--red); }
-  .log-box .log-info { color: #7DB8FF; }
+  .log-box .log-info { color: var(--log-info); }
 
   /* ── Laufanzeige ─────────────────────────────────────────────────────── */
   .running-badge {
@@ -504,7 +578,7 @@
 
   /* ── Modal ───────────────────────────────────────────────────────────── */
   .modal-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,.66);
+    position: fixed; inset: 0; background: var(--overlay);
     backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
     display: flex; align-items: center; justify-content: center; padding: 20px;
     z-index: 200; opacity: 0; pointer-events: none; transition: opacity var(--base);
@@ -526,7 +600,7 @@
     display: flex; align-items: center; justify-content: center;
     transition: background var(--fast), color var(--fast), transform var(--fast);
   }
-  .modal-close:hover { background: #33333B; color: var(--text); transform: rotate(90deg); }
+  .modal-close:hover { background: var(--hover-line); color: var(--text); transform: rotate(90deg); }
   .modal-body { padding: 22px 26px 26px; }
 
   .provider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; margin-bottom: 22px; }
@@ -536,8 +610,8 @@
     background: var(--surface-2); position: relative;
     transition: border-color var(--fast), background var(--fast), transform var(--fast) var(--ease);
   }
-  .provider-tile:hover:not(.disabled) { border-color: var(--accent); transform: translateY(-2px); }
-  .provider-tile.selected { border-color: var(--accent); background: var(--accent-soft); }
+  .provider-tile:hover:not(.disabled) { border-color: var(--accent-strong); transform: translateY(-2px); }
+  .provider-tile.selected { border-color: var(--accent-strong); background: var(--accent-soft); }
   .provider-tile.disabled { opacity: .4; cursor: not-allowed; }
   .provider-tile-logo {
     width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
@@ -916,7 +990,7 @@ async function renderProviders() {
     if (isGmail) {
       if (p.configured) {
         statusClass = 'active'; dotClass = 'green'; statusLabel = 'Aktiv';
-        actionBtns = `<button class="btn btn-ghost" onclick="runGmail()" style="color:var(--accent);font-weight:600"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5l12 7.5-12 7.5z"/></svg> Ausführen</button>`;
+        actionBtns = `<button class="btn btn-ghost" onclick="runGmail()" style="color:var(--accent-strong);font-weight:600"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5l12 7.5-12 7.5z"/></svg> Ausführen</button>`;
       } else {
         statusClass = 'warning'; dotClass = 'yellow'; statusLabel = 'Nicht konfiguriert';
         actionBtns = '';
@@ -931,11 +1005,11 @@ async function renderProviders() {
       actionBtns = `<button class="btn btn-primary" onclick="saveSession('${p.id}')" style="font-size:12px"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg> Session speichern</button>`;
     } else if (isMoss) {
       statusClass = 'active'; dotClass = 'green'; statusLabel = 'Bereit (manueller Abgleich)';
-      actionBtns = `<button class="btn btn-ghost" onclick="setupSession('${p.id}')" style="color:var(--accent);font-weight:600"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L21 2m-4 4l3 3m-6-6l3 3"/></svg> Abgleich starten</button>`;
+      actionBtns = `<button class="btn btn-ghost" onclick="setupSession('${p.id}')" style="color:var(--accent-strong);font-weight:600"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L21 2m-4 4l3 3m-6-6l3 3"/></svg> Abgleich starten</button>`;
     } else if (isAmazon) {
       const amazonHasSession = sessionStatuses['amazon']?.has_session;
       statusClass = 'active'; dotClass = 'green'; statusLabel = amazonHasSession ? 'Aktiv (Session)' : 'Aktiv';
-      actionBtns = `<button class="btn btn-ghost" onclick="triggerRun()" style="color:var(--accent);font-weight:600"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5l12 7.5-12 7.5z"/></svg> Ausführen</button>`;
+      actionBtns = `<button class="btn btn-ghost" onclick="triggerRun()" style="color:var(--accent-strong);font-weight:600"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5l12 7.5-12 7.5z"/></svg> Ausführen</button>`;
     } else if (!hasCredentials) {
       statusClass = 'warning'; dotClass = 'yellow'; statusLabel = 'Keine Zugangsdaten';
       actionBtns = '';
@@ -944,7 +1018,7 @@ async function renderProviders() {
       actionBtns = `<button class="btn btn-primary" onclick="setupSession('${p.id}')" style="font-size:12px"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L21 2m-4 4l3 3m-6-6l3 3"/></svg> Session einrichten</button>`;
     } else {
       statusClass = 'active'; dotClass = 'green'; statusLabel = 'Aktiv';
-      actionBtns = `<button class="btn btn-ghost" onclick="runProvider('${p.id}')" style="color:var(--accent);font-weight:600"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5l12 7.5-12 7.5z"/></svg> Ausführen</button>`;
+      actionBtns = `<button class="btn btn-ghost" onclick="runProvider('${p.id}')" style="color:var(--accent-strong);font-weight:600"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5l12 7.5-12 7.5z"/></svg> Ausführen</button>`;
     }
 
     return `
@@ -1370,7 +1444,7 @@ async function renderLogs() {
         <div class="log-box" id="logBox">${
           allLines.length
             ? allLines.map(colorLine).join('\n')
-            : '<span style="color:#555">Noch keine Logs vorhanden. Starte einen Sync.</span>'
+            : '<span style="color:var(--text-muted)">Noch keine Logs vorhanden. Starte einen Sync.</span>'
         }</div>
       </div>
 
@@ -1629,7 +1703,7 @@ function renderProviderPicker() {
         </div>
       `).join('')}
       <div class="provider-tile" id="tile-custom" onclick="selectProviderTile('custom')">
-        <div class="provider-tile-logo" style="background:#f0f0f0;color:#666;font-size:20px">＋</div>
+        <div class="provider-tile-logo" style="background:var(--surface-3);color:var(--text-muted);font-size:20px">＋</div>
         <div>
           <div class="provider-tile-name">Eigener Anbieter</div>
           <div class="provider-tile-status">Galaxus, CoolBlue, …</div>
