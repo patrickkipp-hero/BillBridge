@@ -150,6 +150,32 @@ wieder, kommt eine Entwarnung. Standardziel ist `SLACK_CHANNEL_ID`,
 `SLACK_ALERT_CHANNEL_ID` lenkt die Meldungen woanders hin. Welche Störungen
 gerade offen sind, steht in `alerts_sent.json`.
 
+## Buchungstext-Vorschläge: Lebenszyklus
+
+Ein Vorschlag wird in den Slack-Thread gepostet und wartet dort auf eine
+Antwort. Was danach passiert:
+
+| Status | Bedeutung |
+|---|---|
+| `open` | wartet auf eine Antwort im Thread oder auf das Eintragen |
+| `applied` | Buchungstext steht in Moss |
+| `ersetzt` | wurde durch einen neu geposteten Thread abgelöst |
+| `verfallen` | aufgegeben – der Grund steht in `verfallen_grund` |
+
+Aufgegeben wird aus drei Gründen, jeder mit genau einem Hinweis im Thread:
+
+* **`nicht_auffindbar`** – die Transaktion fehlt seit 14 Tagen durchgehend in
+  Moss (`MOSS_PROPOSAL_MISSING_DAYS`), vermutlich exportiert. Gezählt wird die
+  Dauer, nicht der einzelne Fehlversuch: Eine Transaktion kann kurzzeitig aus
+  der Ansicht fallen, und taucht sie wieder auf, beginnt die Frist von vorn.
+* **`ohne_antwort`** – seit 30 Tagen keine Antwort im Thread
+  (`MOSS_PROPOSAL_NO_ANSWER_DAYS`). Gilt nur für unbeantwortete; wer geantwortet
+  hat, verliert seine Antwort nicht durch Zeitablauf.
+* **`gesperrt`** – Moss lässt das Feld nicht mehr bearbeiten. Erkennbar daran,
+  dass sich das Detailfeld öffnet, die Steuerung darin aber fehlt. Beim
+  Beleg-Upload erscheinen solche Transaktionen im Protokoll als eigene Gruppe
+  („in Moss gesperrt") statt in der Sammelzahl unterzugehen.
+
 ## Tests
 
 ```bash
@@ -175,6 +201,7 @@ deshalb auch mit einem Python, das die Abhängigkeiten nicht hat – anders als
 | `test_positionen.py` | Produktzeilen aus Amazon-Tabellen, Galaxus (mit/ohne MwSt.-Spalte) und Airalo |
 | `test_slack_antwort.py` | Säubern der Thread-Antworten: HTML-Entitäten, Aufzählungen, Mengenangaben |
 | `test_stoerungsmeldung.py` | Cooldown, Entwarnung, Verhalten ohne Token und bei Slack-Ausfall |
+| `test_vorschlag_lebenszyklus.py` | Fristen zum Ablegen, Zurücksetzen bei wiedergefundener Transaktion, Hinweis im Thread |
 
 ## Projektstruktur
 
