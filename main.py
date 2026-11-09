@@ -1455,13 +1455,17 @@ def _proposal_give_up_reason(ts: str, rec: dict, beantwortet: bool,
     return None
 
 
+# Die Dauer steht nur drin, wenn sie bekannt ist. Beim Aufräumen von Hand
+# fehlt der Vermisst-Beginn, und "seit 31 Tagen nicht auffindbar" wäre dann
+# schlicht falsch: Beim Posten war die Transaktion noch da, sonst hätte es den
+# Vorschlag nie gegeben.
 _PROPOSAL_RETIRE_TEXTS = {
     "nicht_auffindbar": (
-        "⏳ Diese Transaktion ist in Moss seit {tage} Tagen nicht mehr auffindbar "
+        "⏳ Diese Transaktion ist in Moss{dauer} nicht mehr auffindbar "
         "(vermutlich exportiert oder abgeschlossen). Vorschlag abgelegt – falls "
         "der Buchungstext noch gebraucht wird, bitte in Moss von Hand eintragen."),
     "ohne_antwort": (
-        "⏳ Nach {tage} Tagen ohne Antwort abgelegt. Wird der Buchungstext noch "
+        "⏳{dauer_satz} ohne Antwort abgelegt. Wird der Buchungstext noch "
         "gebraucht, bitte in Moss von Hand eintragen."),
     "gesperrt": (
         "🔒 Moss lässt das Buchungstext-Feld dieser Transaktion nicht mehr "
@@ -1470,16 +1474,23 @@ _PROPOSAL_RETIRE_TEXTS = {
 
 
 def _retire_proposal(client, ts: str, rec: dict, grund: str,
-                     jetzt: Optional[datetime] = None) -> None:
+                     jetzt: Optional[datetime] = None, text: str = "") -> None:
     """Legt einen Vorschlag ab und sagt genau einmal im Thread Bescheid.
 
     Der Hinweis geht in den Thread und nicht in den Kanal: dort steht die
-    Antwort, auf die er sich bezieht.
+    Antwort, auf die er sich bezieht. Ist ein Buchungstext bekannt, steht er
+    mit in der Nachricht – der Hinweis bittet um Handarbeit in Moss, und dafür
+    braucht man den Text zum Kopieren.
     """
     jetzt = jetzt or datetime.now()
-    bezug = (_parse_iso(rec.get("nicht_gefunden_seit"))
-             or _proposal_posted_at(ts, rec) or jetzt)
-    tage = max((jetzt - bezug).days, 0)
+    # Bezugspunkt je Grund: Bei "nicht_auffindbar" zählt, seit wann die
+    # Transaktion vermisst wird – ist das unbekannt, wird keine Dauer genannt.
+    # Bei "ohne_antwort" zählt das Alter des Vorschlags.
+    bezug = (_parse_iso(rec.get("nicht_gefunden_seit")) if grund == "nicht_auffindbar"
+             else _proposal_posted_at(ts, rec))
+    tage = max((jetzt - bezug).days, 0) if bezug else None
+    dauer = f" seit {tage} Tagen" if tage is not None else ""
+    dauer_satz = f" Nach {tage} Tagen" if tage is not None else ""
     rec["status"] = "verfallen"
     rec["verfallen_grund"] = grund
     rec["verfallen_am"] = jetzt.isoformat(timespec="seconds")
@@ -1489,9 +1500,12 @@ def _retire_proposal(client, ts: str, rec: dict, grund: str,
     vorlage = _PROPOSAL_RETIRE_TEXTS.get(grund)
     if not (client and vorlage):
         return
+    nachricht = vorlage.format(dauer=dauer, dauer_satz=dauer_satz)
+    if text.strip():
+        nachricht += f"\nDein Buchungstext zum Kopieren: `{text.strip()[:300]}`"
     try:
         client.chat_postMessage(channel=rec["channel"], thread_ts=ts,
-                                text=vorlage.format(tage=tage))
+                                text=nachricht)
     except Exception as e:
         print(f"    Hinweis im Thread fehlgeschlagen: {e}")
 
@@ -1924,7 +1938,7 @@ def apply_buchungstexte_from_slack(page) -> dict:
             _proposal_missing_seen(rec, jetzt)
             grund = _proposal_give_up_reason(ts, rec, beantwortet=True, jetzt=jetzt)
             if grund:
-                _retire_proposal(client, ts, rec, grund, jetzt)
+                _retire_proposal(client, ts, rec, grund, jetzt, text=text)
                 result["retired"] += 1
             else:
                 seit = _parse_iso(rec.get("nicht_gefunden_seit"))
@@ -1941,7 +1955,7 @@ def apply_buchungstexte_from_slack(page) -> dict:
 
         outcome = _fill_buchungstext_only(page, row["row_id"], text)
         if outcome == "gesperrt":
-            _retire_proposal(client, ts, rec, "gesperrt", jetzt)
+            _retire_proposal(client, ts, rec, "gesperrt", jetzt, text=text)
             result["locked"] += 1
             continue
         if outcome == "error":

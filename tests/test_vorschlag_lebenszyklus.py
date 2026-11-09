@@ -161,8 +161,31 @@ def test_ablegen_vermerkt_grund_und_meldet_im_thread():
     nachricht = client.nachrichten[0]
     assert nachricht["thread_ts"] == "1794218418.349439"
     assert nachricht["channel"] == "C-TEST"
-    assert "20 Tagen" in nachricht["text"]
+    assert "seit 20 Tagen" in nachricht["text"]
     assert "von Hand" in nachricht["text"]
+
+
+def test_ohne_bekannten_vermisstbeginn_wird_keine_dauer_behauptet():
+    """Beim Aufräumen von Hand fehlt der Vermisst-Beginn. Beim Posten war die
+    Transaktion noch da, 'seit 31 Tagen vermisst' wäre also falsch."""
+    rec = vorschlag(posted_at=vor_tagen(31))
+    client = FakeClient()
+
+    main._retire_proposal(client, "1", rec, "nicht_auffindbar", JETZT)
+
+    text = client.nachrichten[0]["text"]
+    assert "nicht mehr auffindbar" in text
+    assert "seit" not in text
+    assert "31" not in text
+
+
+def test_ohne_antwort_zaehlt_das_alter_des_vorschlags():
+    rec = vorschlag(posted_at=vor_tagen(30))
+    client = FakeClient()
+
+    main._retire_proposal(client, "1", rec, "ohne_antwort", JETZT)
+
+    assert "Nach 30 Tagen ohne Antwort" in client.nachrichten[0]["text"]
 
 
 def test_gesperrte_transaktion_bekommt_eigenen_hinweis():
@@ -195,3 +218,23 @@ def test_slack_fehler_beim_hinweis_bricht_nichts_ab():
     main._retire_proposal(KaputterClient(), "1", rec, "ohne_antwort", JETZT)
 
     assert rec["status"] == "verfallen"
+
+
+def test_bekannter_buchungstext_steht_zum_kopieren_im_hinweis():
+    """Der Hinweis bittet um Handarbeit in Moss – dafür braucht man den Text."""
+    rec = vorschlag()
+    client = FakeClient()
+
+    main._retire_proposal(client, "1", rec, "nicht_auffindbar", JETZT,
+                          text="RevOps Philipp Bach")
+
+    assert "`RevOps Philipp Bach`" in client.nachrichten[0]["text"]
+
+
+def test_ohne_buchungstext_kein_leerer_zusatz():
+    rec = vorschlag()
+    client = FakeClient()
+
+    main._retire_proposal(client, "1", rec, "ohne_antwort", JETZT, text="   ")
+
+    assert "zum Kopieren" not in client.nachrichten[0]["text"]
