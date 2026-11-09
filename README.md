@@ -150,6 +150,23 @@ wieder, kommt eine Entwarnung. Standardziel ist `SLACK_CHANNEL_ID`,
 `SLACK_ALERT_CHANNEL_ID` lenkt die Meldungen woanders hin. Welche Störungen
 gerade offen sind, steht in `alerts_sent.json`.
 
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests/ -q
+```
+
+Die Tests decken die Stellen ab, an denen falsche Daten nach Moss gelangen
+könnten, und brauchen weder Browser noch Netz:
+
+| Datei | Was festgeschrieben ist |
+|---|---|
+| `test_beleg_zuordnung.py` | Betrag auf den Cent genau, Datumsfenster ±14 Tage, nächstes Datum gewinnt |
+| `test_positionen.py` | Produktzeilen aus Amazon-Tabellen, Galaxus (mit/ohne MwSt.-Spalte) und Airalo |
+| `test_slack_antwort.py` | Säubern der Thread-Antworten: HTML-Entitäten, Aufzählungen, Mengenangaben |
+| `test_stoerungsmeldung.py` | Cooldown, Entwarnung, Verhalten ohne Token und bei Slack-Ausfall |
+
 ## Projektstruktur
 
 ```
@@ -158,6 +175,7 @@ BillBridge/
 ├── main.py                 # Scraping-Logik (Amazon, Galaxus)
 ├── templates/index.html    # Single-Page-App
 ├── static/                 # CSS/Assets
+├── tests/                  # pytest, ohne Browser und Netz lauffähig
 ├── .env.example            # Konfigurationsvorlage
 ├── providers.example.json  # Vorlage für Custom-Provider
 └── requirements.txt

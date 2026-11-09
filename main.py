@@ -1016,6 +1016,63 @@ def download_gmail_invoices() -> list[Path]:
 _NON_PRODUCT_ROW_LABELS = {"versandkosten", "aktionsrabatt", "gutschein", "rabatt", "verpackung", "pfand"}
 
 
+def _line_items_from_table(table) -> list[str]:
+    """Produktzeilen aus einer Amazon-Rechnungstabelle (Beschreibung, Menge, …).
+
+    Ohne pdfplumber testbar: erwartet die Tabelle so, wie page.extract_tables()
+    sie liefert – eine Liste von Zeilen, jede Zeile eine Liste von Zellen.
+    """
+    items = []
+    for row in table or []:
+        if not row or len(row) < 2:
+            continue
+        desc, qty = row[0], row[1]
+        # Ohne Mengenangabe ist es keine Produktzeile, sondern Kopf oder Summe.
+        if not desc or not qty or not qty.strip().isdigit():
+            continue
+        if desc.strip().lower() in _NON_PRODUCT_ROW_LABELS:
+            continue
+        desc_clean = re.sub(r"\n?ASIN:\S+", "", desc).replace("\n", " ").strip()
+        desc_clean = re.sub(r"\s+", " ", desc_clean)
+        if desc_clean:
+            items.append(desc_clean)
+    return items
+
+
+def _line_items_from_text(text: str) -> list[str]:
+    """Produktzeilen aus dem reinen PDF-Text (Galaxus- und Airalo-Layout).
+
+    Fällt nur an, wenn die Tabellenerkennung nichts geliefert hat.
+    """
+    items = []
+    # Galaxus, Eigenverkauf (mit MwSt.-Spalte):
+    #   "Produktname 24121911 19.05.2026 1 19,00% 336,13 399,99 ..."
+    # Galaxus, Drittanbieter (Spalten "Menge Preis Betrag", KEINE
+    # MwSt.-Spalte, Beschreibung mit Fußnotenmarke "1)"):
+    #   "Apple TV 4K (3. Gen) ... 1) 22720374 18.08.2026 1 330,07 330,07"
+    # Die Prozentspalte ist deshalb optional; danach muss aber ein
+    # Betrag stehen, damit nicht jede Textzeile mit Zahlen greift.
+    # In der Spalte "Versand" steht entweder ein Datum oder der
+    # Status "nicht geliefert" (dessen zweites Wort in die nächste
+    # Zeile umbricht) – beides muss die Position passieren lassen.
+    galaxus_row = (r"^(.+?)\s+\d{6,}\s+(?:\d{2}\.\d{2}\.\d{4}|nicht)\s+\d+"
+                   r"\s+(?:[\d,]+%\s+)?[\d.]*\d,\d{2}")
+    for m in re.finditer(galaxus_row, text, re.MULTILINE):
+        desc = re.sub(r"\s+", " ", m.group(1)).strip()
+        # Fußnotenmarke der Drittanbieter-Positionen entfernen.
+        # Leerzeichen davor ist Pflicht und die Zahl kurz, sonst
+        # verstümmelt das Produktangaben wie '... (13.60", 16:10)'.
+        desc = re.sub(r"\s+\d{1,2}\)$", "", desc).strip()
+        if desc:
+            items.append(desc)
+    # Airalo: "1 Europa - eSIM - Unbegrenzt - 30 Tage 63.50 € 63.50 €"
+    if not items:
+        for m in re.finditer(r"^\d+\s+(.+?)\s+[\d.,]+\s*€\s+[\d.,]+\s*€\s*$",
+                             text, re.MULTILINE):
+            items.append(re.sub(r"\s+", " ", m.group(1)).strip())
+    return items
+
+
 def extract_invoice_line_items(pdf_path: Path) -> list[str]:
     """Extrahiert Produktbeschreibungen aus einer Rechnungs-PDF
     (Amazon-Tabellenlayout, Galaxus- und Airalo-Textlayout)."""
@@ -1027,45 +1084,11 @@ def extract_invoice_line_items(pdf_path: Path) -> list[str]:
             # Amazon: Tabellenstruktur mit Beschreibung + Menge
             for page in pdf.pages:
                 for table in page.extract_tables():
-                    for row in table:
-                        if not row or len(row) < 2:
-                            continue
-                        desc, qty = row[0], row[1]
-                        if not desc or not qty or not qty.strip().isdigit():
-                            continue
-                        if desc.strip().lower() in _NON_PRODUCT_ROW_LABELS:
-                            continue
-                        desc_clean = re.sub(r"\n?ASIN:\S+", "", desc).replace("\n", " ").strip()
-                        desc_clean = re.sub(r"\s+", " ", desc_clean)
-                        if desc_clean:
-                            items.append(desc_clean)
+                    items.extend(_line_items_from_table(table))
 
             if not items:
                 text = "\n".join(p.extract_text() or "" for p in pdf.pages)
-                # Galaxus, Eigenverkauf (mit MwSt.-Spalte):
-                #   "Produktname 24121911 19.05.2026 1 19,00% 336,13 399,99 ..."
-                # Galaxus, Drittanbieter (Spalten "Menge Preis Betrag", KEINE
-                # MwSt.-Spalte, Beschreibung mit Fußnotenmarke "1)"):
-                #   "Apple TV 4K (3. Gen) ... 1) 22720374 18.08.2026 1 330,07 330,07"
-                # Die Prozentspalte ist deshalb optional; danach muss aber ein
-                # Betrag stehen, damit nicht jede Textzeile mit Zahlen greift.
-                # In der Spalte "Versand" steht entweder ein Datum oder der
-                # Status "nicht geliefert" (dessen zweites Wort in die nächste
-                # Zeile umbricht) – beides muss die Position passieren lassen.
-                galaxus_row = (r"^(.+?)\s+\d{6,}\s+(?:\d{2}\.\d{2}\.\d{4}|nicht)\s+\d+"
-                               r"\s+(?:[\d,]+%\s+)?[\d.]*\d,\d{2}")
-                for m in re.finditer(galaxus_row, text, re.MULTILINE):
-                    desc = re.sub(r"\s+", " ", m.group(1)).strip()
-                    # Fußnotenmarke der Drittanbieter-Positionen entfernen.
-                    # Leerzeichen davor ist Pflicht und die Zahl kurz, sonst
-                    # verstümmelt das Produktangaben wie '... (13.60", 16:10)'.
-                    desc = re.sub(r"\s+\d{1,2}\)$", "", desc).strip()
-                    if desc:
-                        items.append(desc)
-                # Airalo: "1 Europa - eSIM - Unbegrenzt - 30 Tage 63.50 € 63.50 €"
-                if not items:
-                    for m in re.finditer(r"^\d+\s+(.+?)\s+[\d.,]+\s*€\s+[\d.,]+\s*€\s*$", text, re.MULTILINE):
-                        items.append(re.sub(r"\s+", " ", m.group(1)).strip())
+                items.extend(_line_items_from_text(text))
     except Exception as e:
         print(f"    PDF-Textextraktion fehlgeschlagen ({pdf_path.name}): {e}")
     return items
