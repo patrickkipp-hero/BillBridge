@@ -34,3 +34,15 @@ except ModuleNotFoundError:
 
     platzhalter.WebClient = WebClient
     sys.modules["slack_sdk"] = platzhalter
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _jede_pdf_gilt_als_rechnung(monkeypatch):
+    """Die meisten Tests arbeiten mit leeren PDF-Attrappen. Ob eine PDF eine
+    Rechnung ist, prüft test_belegpruefung.py eigens und stellt die Regel dort
+    gezielt scharf."""
+    import main
+    monkeypatch.setattr(main, "_ist_rechnung", lambda pfad: (True, ""))
