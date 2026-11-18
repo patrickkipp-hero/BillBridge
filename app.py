@@ -13,6 +13,8 @@ from datetime import datetime
 from flask import Flask, render_template, jsonify, request, send_file, redirect, url_for
 from dotenv import load_dotenv, set_key
 
+import uebersicht
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -120,7 +122,8 @@ def save_providers(providers):
     custom = [p for p in providers if p.get("custom")]
     PROVIDERS_FILE.write_text(json.dumps(custom, indent=2, ensure_ascii=False))
 
-run_status = {"running": False, "log": [], "last_run": None, "last_count": 0, "last_new_count": 0}
+run_status = {"running": False, "log": [], "last_run": None, "last_count": 0, "last_new_count": 0,
+              "started": None, "titel": ""}
 
 
 # ── Störungsmeldungen ───────────────────────────────────────────────────────
@@ -422,6 +425,8 @@ def api_run_gmail():
 
 def _run_gmail_sync():
     run_status["running"] = True
+    run_status["started"] = datetime.now()
+    run_status["titel"] = "Gmail wird nach Rechnungen durchsucht"
     run_status["log"] = []
 
     def _log(msg):
@@ -512,6 +517,8 @@ def _setup_session_sync(provider: dict):
 
     provider_id = provider["id"]
     run_status["running"] = True
+    run_status["started"] = datetime.now()
+    run_status["titel"] = "Anmeldefenster ist offen"
     run_status["log"] = []
 
     def _log(msg):
@@ -593,6 +600,8 @@ def _save_session_sync(provider: dict):
 
     provider_id = provider["id"]
     run_status["running"] = True
+    run_status["started"] = datetime.now()
+    run_status["titel"] = "Anmeldung wird gespeichert"
     run_status["log"] = []
 
     def _log(msg):
@@ -675,7 +684,7 @@ with sync_playwright() as pw:
 
     try:
         proc = subprocess.Popen(
-            [sys.executable, tmp_path],
+            [sys.executable, "-u", tmp_path],  # ungepuffert: Fortschritt zeilenweise
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, cwd=str(BASE_DIR),
         )
@@ -735,6 +744,8 @@ def _moss_reconcile_sync(provider: dict):
 
     provider_id = provider["id"]
     run_status["running"] = True
+    run_status["started"] = datetime.now()
+    run_status["titel"] = "Abgleich mit Moss läuft"
     run_status["log"] = []
 
     def _log(msg):
@@ -798,7 +809,7 @@ with sync_playwright() as pw:
 
     try:
         proc = subprocess.Popen(
-            [sys.executable, tmp_path],
+            [sys.executable, "-u", tmp_path],  # ungepuffert: Fortschritt zeilenweise
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, cwd=str(BASE_DIR),
         )
@@ -852,6 +863,8 @@ def api_run_provider(provider_id):
 def _run_provider_sync(provider: dict, headless: bool = True):
     import importlib.util, io
     run_status["running"] = True
+    run_status["started"] = datetime.now()
+    run_status["titel"] = "Rechnungen werden geholt"
     run_status["log"] = []
 
     def _log(msg):
@@ -908,10 +921,106 @@ def api_status():
     return jsonify({
         "running": run_status["running"],
         "log": run_status["log"][-50:],
+        "started": run_status["started"].strftime("%H:%M") if run_status["started"] else None,
+        "seconds": (int((datetime.now() - run_status["started"]).total_seconds())
+                    if run_status["running"] and run_status["started"] else None),
+        "fortschritt": _fortschritt(),
         "last_run": run_status["last_run"],
         "last_count": run_status["last_count"],
         "last_new_count": run_status["last_new_count"],
     })
+
+
+def _fortschritt() -> dict:
+    f = uebersicht.lauf_fortschritt(run_status["log"], run_status["running"])
+    if f["art"] == "sonst" and run_status.get("titel"):
+        f["titel"] = run_status["titel"]   # z. B. Gmail-Abruf, Anmeldefenster
+    return f
+
+
+MOSS_STAND_FILE = BASE_DIR / "moss_stand.json"
+_slack_url_cache = {}
+
+
+def _lies_json(pfad, ersatz):
+    try:
+        return json.loads(pfad.read_text())
+    except (OSError, json.JSONDecodeError):
+        return ersatz
+
+
+def _slack_workspace_url() -> str:
+    """Adresse des Slack-Workspace für Thread-Links; einmal erfragt, dann gemerkt."""
+    if "url" not in _slack_url_cache:
+        token = os.getenv("SLACK_BOT_TOKEN") or os.getenv("SLACK_USER_TOKEN")
+        url = ""
+        if token:
+            try:
+                from slack_sdk import WebClient
+                url = WebClient(token=token, timeout=5).auth_test().get("url") or ""
+            except Exception:
+                url = ""
+        _slack_url_cache["url"] = url
+    return _slack_url_cache["url"]
+
+
+def _verbindungen() -> list:
+    def sitzung(pid):
+        f = BASE_DIR / "sessions" / f"{pid}_session.json"
+        return f.exists() and f.stat().st_size > 100
+
+    moss_offen = "moss" in _session_browsers
+    liste = [{
+        "name": "Moss-Fenster", "ok": moss_offen,
+        "text": "offen und angemeldet" if moss_offen
+                else "nicht offen – unter Anbieter bei Moss die Session einrichten",
+    }]
+    for p in load_providers():
+        if p["id"] in ("moss", "gmail"):
+            continue
+        ok = sitzung(p["id"])
+        liste.append({"name": p["name"], "ok": ok,
+                      "text": "Anmeldung gespeichert" if ok else "keine gespeicherte Anmeldung"})
+    slack_ok = bool(os.getenv("SLACK_BOT_TOKEN") or os.getenv("SLACK_USER_TOKEN"))
+    liste.append({"name": "Slack", "ok": slack_ok,
+                  "text": "verbunden" if slack_ok else "kein Token hinterlegt"})
+    return liste
+
+
+@app.route("/api/uebersicht")
+def api_uebersicht():
+    settings = load_settings()
+    daten = uebersicht.baue_uebersicht(
+        _lies_json(MOSS_PROPOSALS_FILE, {}), _lies_json(MOSS_STAND_FILE, None),
+        _slack_workspace_url())
+    daten.update({
+        "user_name": get_env_val("AMAZON_EMAIL", "Nutzer").split("@")[0].replace(".", " ").title(),
+        "running": run_status["running"],
+        "last_run": run_status["last_run"],
+        "next_run": f"{settings['schedule_time']} Uhr" if settings["schedule_enabled"] else None,
+        "moss_fenster": "moss" in _session_browsers,
+        "verbindungen": _verbindungen(),
+        "rechnungen": len(get_invoices()),
+    })
+    return jsonify(daten)
+
+
+@app.route("/api/vorschlag_erledigt", methods=["POST"])
+def api_vorschlag_erledigt():
+    """Merkt sich, dass ein in Moss gesperrter Buchungstext von Hand eingetragen
+    wurde. Der Status des Vorschlags bleibt unberührt – nur die Übersicht
+    blendet ihn danach aus."""
+    if run_status["running"]:
+        # Ein laufender Abgleich schreibt dieselbe Datei – nicht dazwischenfunken.
+        return jsonify({"ok": False, "error": "Gerade läuft ein Abgleich – bitte danach noch einmal."}), 409
+    ts = (request.get_json(silent=True) or {}).get("ts")
+    store = _lies_json(MOSS_PROPOSALS_FILE, {})
+    treffer = next((k for k, r in store.items() if (r.get("ts") or k) == ts), None)
+    if not treffer:
+        return jsonify({"ok": False, "error": "Vorschlag nicht gefunden"}), 404
+    store[treffer]["von_hand_erledigt_am"] = datetime.now().isoformat(timespec="seconds")
+    MOSS_PROPOSALS_FILE.write_text(json.dumps(store, indent=2, ensure_ascii=False))
+    return jsonify({"ok": True})
 
 
 @app.route("/api/logs")
@@ -937,9 +1046,11 @@ def _set_env(key, value):
 
 def _run_sync(headless=True):
     run_status["running"] = True
+    run_status["started"] = datetime.now()
+    run_status["titel"] = "Rechnungen werden geholt"
     run_status["log"] = []
     count_before = len(get_invoices())
-    args = ["python3", str(BASE_DIR / "main.py")]
+    args = ["python3", "-u", str(BASE_DIR / "main.py")]
     if not headless:
         args.append("--no-headless")
 

@@ -22,16 +22,17 @@
     color-scheme: dark;
     /* Flächen */
     --bg:          #09090B;
-    --surface:     #121215;
-    --surface-2:   #1A1A1F;
-    --surface-3:   #232329;
-    --border:      #26262C;
-    --border-soft: #1C1C21;
+    --surface:     #09090B;
+    --surface-2:   #18181B;
+    --surface-3:   #27272A;
+    --border:      #27272A;
+    --border-soft: #27272A;
 
     /* Text – alle ≥ 4.5:1 auf --bg */
     --text:        #FAFAFA;
-    --text-dim:    #C4C4CC;
-    --text-muted:  #92929E;
+    --text-dim:    #D4D4D8;
+    --text-muted:  #A1A1AA;
+    --primary:     #FAFAFA;   /* Balken, erledigte Schritte */
 
     /* Marke */
     --accent:      #FFD400;
@@ -46,13 +47,17 @@
     --accent-ring: color-mix(in srgb, var(--accent) 24%, transparent);
 
     /* Zustände */
-    --green: #3DDC97;  --green-bg: rgba(61, 220, 151, 0.12);
-    --red:   #FF6B6B;  --red-bg:   rgba(255, 107, 107, 0.12);
-    --yellow:#FFC53D;  --yellow-bg:rgba(255, 197, 61, 0.12);
+    --green: #86EFAC;  --green-bg: #14532D;
+    --red:   #FCA5A5;  --red-bg:   #7F1D1D;
+    --yellow:#FDBA74;  --yellow-bg:#7C2D12;
+    --info:  #93C5FD;  --info-bg:  #1E3A8A;
+    --tag:   #7DD3FC;  --tag-bg:   #0C4A6E;
+    --yellow-soft: rgba(255, 230, 0, .12);
+    --yellow-soft: color-mix(in srgb, var(--accent) 12%, transparent);
 
-    --radius:    12px;
-    --radius-sm: 8px;
-    --radius-lg: 18px;
+    --radius:    16px;
+    --radius-sm: 6px;
+    --radius-lg: 16px;
 
     --font: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --mono: 'Fira Code', ui-monospace, 'SF Mono', Menlo, monospace;
@@ -67,10 +72,10 @@
 
     /* Einzelwerte, die je Palette kippen müssen */
     --accent-strong: var(--accent);      /* Akzent als Text, Linie, Fokusring */
-    --hover-line:    #33333B;
-    --surface-hover: #2E2E36;
-    --placeholder:   #5A5A66;
-    --knob:          #6B6B78;
+    --hover-line:    #3F3F46;
+    --surface-hover: #3F3F46;
+    --placeholder:   #71717A;
+    --knob:          #A1A1AA;
     --topbar-bg:     rgba(9,9,11,.72);
     --ripple-soft:   rgba(255,255,255,.16);
     --log-bg:        #050506;
@@ -92,6 +97,7 @@
       --text:        #1A1A1A;
       --text-dim:    #3F3F46;
       --text-muted:  #71717A;
+      --primary:     #09090B;
 
       /* Der Akzent trägt auf Weiß keinen Text: dafür eine abgedunkelte Fassung,
          die der gewählten Akzentfarbe folgt (Gelb → dunkles Bernstein). */
@@ -100,7 +106,11 @@
 
       --green: #15803D;  --green-bg: #DCFCE7;
       --red:   #B91C1C;  --red-bg:   #FEE2E2;
-      --yellow:#A16207;  --yellow-bg:#FEF9C3;
+      --yellow:#C2410C;  --yellow-bg:#FFEDD5;
+      --info:  #1D4ED8;  --info-bg:  #DBEAFE;
+      --tag:   #0369A1;  --tag-bg:   #E0F2FE;
+      --yellow-soft: #FFFCE0;
+      --yellow-soft: color-mix(in srgb, var(--accent) 14%, #fff);
 
       --shadow:    0 1px 2px rgba(0,0,0,.06), 0 8px 24px -12px rgba(0,0,0,.12);
       --shadow-lg: 0 24px 60px -20px rgba(0,0,0,.25);
@@ -115,39 +125,12 @@
       --log-info:      #1D4ED8;
       --overlay:       rgba(0,0,0,.4);
     }
-    /* Die Seitenleiste bleibt in beiden Paletten dunkel */
-    .sidebar {
-      color-scheme: dark;
-      color: #FAFAFA;
-      --surface:     #121215;
-      --surface-2:   #1A1A1F;
-      --surface-3:   #232329;
-      --border:      #26262C;
-      --border-soft: #1C1C21;
-      --text:        #FAFAFA;
-      --text-dim:    #C4C4CC;
-      --text-muted:  #92929E;
-      --accent-strong: var(--accent);
-      --green: #3DDC97;  --green-bg: rgba(61, 220, 151, 0.12);
-      --red:   #FF6B6B;  --red-bg:   rgba(255, 107, 107, 0.12);
-      --yellow:#FFC53D;  --yellow-bg:rgba(255, 197, 61, 0.12);
-      --hover-line:    #33333B;
-      --surface-hover: #2E2E36;
-      --placeholder:   #5A5A66;
-    }
   }
 
   html, body {
     height: 100%; font-family: var(--font); font-size: 14px;
     background: var(--bg); color: var(--text);
     -webkit-font-smoothing: antialiased;
-  }
-  /* Ruhiger Lichtschein hinter der Oberfläche – erzeugt Tiefe ohne Muster */
-  body::before {
-    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background:
-      radial-gradient(70ch 40ch at 18% -10%, var(--accent-glow), transparent 60%),
-      radial-gradient(60ch 40ch at 100% 0%, rgba(61,220,151,.06), transparent 55%);
   }
   ::selection { background: var(--accent); color: var(--accent-ink); }
 
@@ -166,31 +149,40 @@
   .app { display: flex; height: 100vh; overflow: hidden; position: relative; z-index: 1; }
 
   /* ── Sidebar ─────────────────────────────────────────────────────────── */
+  /* In beiden Paletten dieselbe dunkle Fläche – deshalb eigene Farbwerte */
   .sidebar {
-    width: 244px; min-width: 244px; background: var(--surface);
+    color-scheme: dark; color: #FAFAFA;
+    --surface:     #18181B;
+    --surface-2:   #27272A;
+    --surface-3:   #3F3F46;
+    --border:      #3F3F46;
+    --border-soft: #27272A;
+    --text:        #FAFAFA;
+    --text-dim:    #D4D4D8;
+    --text-muted:  #A1A1AA;
+    --accent-strong: var(--accent);
+    --hover-line:    #52525B;
+    --surface-hover: #52525B;
+    --placeholder:   #A1A1AA;
+
+    width: 256px; min-width: 256px; background: var(--surface);
     border-right: 1px solid var(--border-soft);
-    display: flex; flex-direction: column; padding: 18px 0 14px;
+    display: flex; flex-direction: column; padding: 16px 0 12px;
     user-select: none;
   }
-  .sidebar-logo { display: flex; align-items: center; gap: 11px; padding: 0 18px 18px; }
+  .sidebar-logo { display: flex; align-items: center; gap: 10px; padding: 4px 16px 16px; }
   .logo-icon {
-    width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0;
+    width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0;
     background: var(--accent); color: var(--accent-ink);
     display: flex; align-items: center; justify-content: center;
-    font-size: 15px; font-weight: 800; letter-spacing: -0.04em;
-    box-shadow: 0 0 0 0 var(--accent-glow);
-    animation: logoBreath 5s var(--ease) infinite;
+    font-size: 15px; font-weight: 800;
   }
-  @keyframes logoBreath {
-    0%, 100% { box-shadow: 0 0 0 0 var(--accent-ring); }
-    50%      { box-shadow: 0 0 0 9px transparent; }
-  }
-  .logo-text { color: var(--text); font-size: 15px; font-weight: 700; line-height: 1.15; letter-spacing: -0.01em; }
-  .logo-sub  { color: var(--text-muted); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; margin-top: 2px; }
+  .logo-text { color: var(--text); font-size: 15px; font-weight: 600; line-height: 1.2; }
+  .logo-sub  { color: var(--text-muted); font-size: 11px; margin-top: 1px; }
 
   .sidebar-search {
     margin: 0 14px 18px; background: var(--surface-2);
-    border: 1px solid var(--border); border-radius: 10px;
+    border: 1px solid var(--border); border-radius: 8px;
     display: flex; align-items: center; padding: 8px 11px; gap: 9px;
     transition: border-color var(--fast), background var(--fast);
   }
@@ -213,42 +205,38 @@
   }
 
   .nav-item {
-    display: flex; align-items: center; gap: 11px;
-    padding: 9px 10px; border-radius: 9px; cursor: pointer;
-    color: var(--text-muted); font-size: 13.5px; font-weight: 500;
-    position: relative; margin-bottom: 2px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px; border-radius: 8px; cursor: pointer;
+    color: var(--text-dim); font-size: 14px; font-weight: 500;
+    margin-bottom: 4px;
     transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
   }
-  /* Aktivmarke wächst aus der Mitte – zeigt, wo man ist */
-  .nav-item::before {
-    content: ''; position: absolute; left: 0; top: 50%;
-    width: 3px; height: 0; transform: translateY(-50%);
-    background: var(--accent); border-radius: 0 3px 3px 0;
-    transition: height var(--base) var(--ease-out);
+  .nav-item:hover { background: var(--surface-2); color: var(--text); }
+  .nav-item.active {
+    background: rgba(181, 165, 44, .35);
+    background: color-mix(in srgb, var(--accent) 28%, transparent);
+    color: #FAFAFA;
   }
-  .nav-item:hover { background: var(--surface-2); color: var(--text-dim); }
-  .nav-item.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
-  .nav-item.active::before { height: 20px; }
-  .nav-item.active .nav-icon { color: var(--accent); }
+  .nav-item.active .nav-icon { color: #FEF4A8; color: color-mix(in srgb, var(--accent) 45%, #fff); }
   .nav-icon { width: 18px; height: 18px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: currentColor; }
   .nav-icon svg { width: 17px; height: 17px; stroke-width: 1.8; }
   .nav-badge {
-    margin-left: auto; background: var(--surface-3); color: var(--text-dim);
-    font-size: 10.5px; font-weight: 700; font-family: var(--mono);
-    border-radius: 20px; padding: 2px 7px; min-width: 20px; text-align: center;
+    margin-left: auto; background: var(--surface-3); color: var(--text);
+    font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums;
+    border-radius: 6px; padding: 1px 7px; min-width: 22px; text-align: center;
   }
-  .nav-item.active .nav-badge { background: var(--accent); color: var(--accent-ink); }
+  .nav-item.active .nav-badge { background: rgba(255,255,255,.16); }
 
   .sidebar-bottom { margin-top: auto; padding: 12px 12px 0; border-top: 1px solid var(--border-soft); }
   .user-chip {
     display: flex; align-items: center; gap: 10px; margin-top: 8px;
-    padding: 9px 10px; border-radius: 9px; cursor: pointer;
+    padding: 9px 10px; border-radius: 8px; cursor: pointer;
     transition: background var(--fast);
   }
   .user-chip:hover { background: var(--surface-2); }
   .user-avatar {
     width: 30px; height: 30px; background: var(--accent); color: var(--accent-ink);
-    border-radius: 9px; display: flex; align-items: center; justify-content: center;
+    border-radius: 8px; display: flex; align-items: center; justify-content: center;
     font-weight: 800; font-size: 11px; flex-shrink: 0;
   }
   .user-name  { font-weight: 600; color: var(--text-dim); font-size: 12.5px; }
@@ -258,23 +246,23 @@
   .main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
 
   .topbar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 32px; background: var(--topbar-bg);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap;
+    min-height: 64px; padding: 12px 32px; background: var(--topbar-bg);
     backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-    border-bottom: 1px solid var(--border-soft);
+    border-bottom: 1px solid var(--border);
     position: sticky; top: 0; z-index: 10;
   }
-  .topbar-title { font-size: 13px; font-weight: 500; color: var(--text-muted); letter-spacing: .01em; }
-  .topbar-title span { color: var(--text); font-weight: 700; }
+  .topbar-title { font-size: 14px; font-weight: 500; color: var(--text-muted); }
+  .topbar-title span { color: var(--text); font-weight: 600; }
 
-  .content { padding: 32px; flex: 1; max-width: 1400px; width: 100%; }
+  .content { padding: 32px 32px 48px; flex: 1; max-width: 1280px; width: 100%; }
 
   /* ── Buttons ─────────────────────────────────────────────────────────── */
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-    padding: 9px 17px; border-radius: 10px; font-size: 13px; font-weight: 600;
+    padding: 0 14px; border-radius: 6px; font-size: 14px; font-weight: 500;
     font-family: var(--font); border: 1px solid transparent; cursor: pointer;
-    min-height: 38px; position: relative; overflow: hidden;
+    min-height: 36px; position: relative; overflow: hidden; white-space: nowrap;
     transition: transform var(--fast) var(--ease), background var(--fast), border-color var(--fast), opacity var(--fast);
   }
   .btn:active { transform: scale(.97); }
@@ -283,8 +271,8 @@
   .btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, #fff); }
   .btn-secondary { background: var(--surface-3); color: var(--text); }
   .btn-secondary:hover:not(:disabled) { background: var(--surface-hover); }
-  .btn-ghost { background: transparent; color: var(--text-dim); border-color: var(--border); }
-  .btn-ghost:hover:not(:disabled) { background: var(--surface-2); border-color: var(--hover-line); }
+  .btn-ghost { background: transparent; color: var(--text); border-color: var(--hover-line); }
+  .btn-ghost:hover:not(:disabled) { background: var(--surface-2); }
   .btn-danger { background: transparent; color: var(--red); border: none; padding: 0; min-height: 0; font-size: 13px; font-weight: 600; }
   .btn-danger:hover { text-decoration: underline; }
   /* Druckwelle: bestätigt den Klick, bevor die Antwort da ist */
@@ -303,26 +291,24 @@
 
   /* ── Karten ──────────────────────────────────────────────────────────── */
   .card {
-    background: var(--surface); border: 1px solid var(--border-soft);
-    border-radius: var(--radius); padding: 22px;
-    transition: border-color var(--base) var(--ease), transform var(--base) var(--ease);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px;
   }
-  .card:hover { border-color: var(--border); }
-  .card-title { font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+  .card-title { font-size: 16px; line-height: 24px; font-weight: 700; }
   .card-sub   { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; margin-bottom: 18px; }
 
   /* ── Übersicht ───────────────────────────────────────────────────────── */
   .greeting {
-    font-size: 30px; font-weight: 800; letter-spacing: -.03em; margin-bottom: 6px;
+    font-size: 24px; line-height: 36px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 2px;
   }
-  .greeting-sub { font-size: 13.5px; color: var(--text-muted); margin-bottom: 30px; line-height: 1.6; }
+  .greeting-sub { font-size: 14px; color: var(--text-muted); margin-bottom: 24px; line-height: 1.6; }
   .greeting-sub a { color: var(--accent-strong); text-decoration: none; font-weight: 600; border-bottom: 1px solid var(--accent-dim); }
 
   .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; margin-bottom: 26px; }
   @media (min-width: 1180px) { .stats-grid { grid-template-columns: repeat(4, minmax(0,1fr)); } }
   @media (max-width: 560px)  { .stats-grid { grid-template-columns: 1fr; } }
   .stat-card {
-    background: var(--surface); border: 1px solid var(--border-soft);
+    background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius); padding: 20px 22px; position: relative; overflow: hidden;
     transition: border-color var(--base), transform var(--base) var(--ease);
   }
@@ -331,8 +317,6 @@
     background: linear-gradient(90deg, transparent, var(--accent), transparent);
     opacity: 0; transition: opacity var(--base);
   }
-  .stat-card:hover { transform: translateY(-2px); border-color: var(--border); }
-  .stat-card:hover::after { opacity: .5; }
   .stat-label { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .1em; font-weight: 600; margin-bottom: 10px; }
   .stat-value { font-size: 32px; font-weight: 800; line-height: 1; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
   .stat-sub   { font-size: 11.5px; color: var(--text-muted); margin-top: 7px; }
@@ -356,7 +340,7 @@
   .provider-item { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border-soft); }
   .provider-item:last-child { border-bottom: none; }
   .provider-logo {
-    width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
+    width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
     font-weight: 800; font-size: 11px;
   }
@@ -370,13 +354,7 @@
 
   .next-run-card {
     border-radius: var(--radius); padding: 20px; margin-top: 16px;
-    background: linear-gradient(145deg, var(--surface-2), var(--surface));
-    border: 1px solid var(--border); position: relative; overflow: hidden;
-  }
-  .next-run-card::before {
-    content: ''; position: absolute; top: -40%; right: -20%;
-    width: 200px; height: 200px; border-radius: 50%;
-    background: var(--accent-glow); filter: blur(30px);
+    border: 1px solid var(--border); background: var(--surface);
   }
   .next-run-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .1em; font-weight: 600; }
   .next-run-time  { font-size: 26px; font-weight: 800; letter-spacing: -.03em; margin-top: 8px; font-variant-numeric: tabular-nums; }
@@ -387,17 +365,17 @@
   .invoice-list { overflow-y: auto; padding-right: 4px; }
   .invoice-item {
     display: flex; align-items: center; gap: 12px; margin-bottom: 6px;
-    padding: 13px 15px; border-radius: 10px; cursor: pointer;
-    background: var(--surface); border: 1px solid var(--border-soft);
+    padding: 13px 15px; border-radius: 8px; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--border);
     transition: border-color var(--fast), background var(--fast), transform var(--fast) var(--ease);
   }
-  .invoice-item:hover { border-color: var(--border); transform: translateX(3px); }
+  .invoice-item:hover { border-color: var(--hover-line); }
   .invoice-item.active { border-color: var(--accent-strong); background: var(--accent-soft); }
   .invoice-icon { font-size: 20px; flex-shrink: 0; opacity: .85; }
   .invoice-name { font-size: 12.5px; font-weight: 600; word-break: break-all; line-height: 1.35; }
   .invoice-meta { font-size: 11px; color: var(--text-muted); margin-top: 3px; font-family: var(--mono); }
   .invoice-preview {
-    background: var(--surface); border: 1px solid var(--border-soft);
+    background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column;
   }
   .invoice-preview-bar {
@@ -409,12 +387,11 @@
 
   /* ── Anbieter ────────────────────────────────────────────────────────── */
   .provider-card {
-    background: var(--surface); border: 1px solid var(--border-soft);
+    background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius); padding: 20px 22px; margin-bottom: 12px;
     display: flex; align-items: center; gap: 18px;
     transition: border-color var(--base), transform var(--base) var(--ease);
   }
-  .provider-card:hover { border-color: var(--border); transform: translateY(-2px); }
   .provider-badge {
     width: 46px; height: 46px; border-radius: 12px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
@@ -437,7 +414,7 @@
   .form-hint  { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
   .form-input {
     width: 100%; padding: 11px 14px; border: 1px solid var(--border);
-    border-radius: 10px; font-size: 13px; font-family: var(--font);
+    border-radius: 8px; font-size: 13px; font-family: var(--font);
     background: var(--surface-2); color: var(--text); outline: none;
     transition: border-color var(--fast), background var(--fast), box-shadow var(--fast);
   }
@@ -458,7 +435,7 @@
   /* ── Automatisierung ─────────────────────────────────────────────────── */
   .toggle-group { display: flex; gap: 8px; flex-wrap: wrap; }
   .toggle-btn {
-    padding: 8px 17px; border-radius: 9px; border: 1px solid var(--border);
+    padding: 8px 17px; border-radius: 8px; border: 1px solid var(--border);
     background: var(--surface-2); color: var(--text-dim); cursor: pointer;
     font-size: 12.5px; font-weight: 600; font-family: var(--font); min-height: 38px;
     transition: all var(--fast) var(--ease);
@@ -468,7 +445,7 @@
   .toggle-btn:active { transform: scale(.96); }
 
   .time-input {
-    padding: 11px 16px; border: 1px solid var(--border); border-radius: 10px;
+    padding: 11px 16px; border: 1px solid var(--border); border-radius: 8px;
     font-size: 17px; font-weight: 700; font-family: var(--mono);
     background: var(--surface-2); color: var(--text);
     outline: none; width: 124px; transition: border-color var(--fast), box-shadow var(--fast);
@@ -510,7 +487,7 @@
 
   .color-swatches { display: flex; gap: 9px; align-items: center; }
   .color-swatch {
-    width: 30px; height: 30px; border-radius: 9px; cursor: pointer;
+    width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
     border: 2px solid transparent; transition: transform var(--fast) var(--ease), border-color var(--fast);
   }
   .color-swatch:hover { transform: scale(1.14); }
@@ -518,8 +495,8 @@
 
   .keychain-row {
     display: flex; align-items: center; gap: 15px; margin-top: 6px;
-    background: var(--surface-2); border: 1px solid var(--border-soft);
-    border-radius: 11px; padding: 15px 17px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 15px 17px;
   }
   .keychain-icon { font-size: 22px; opacity: .9; }
   .keychain-info { flex: 1; }
@@ -529,7 +506,7 @@
   /* ── Log ─────────────────────────────────────────────────────────────── */
   .log-box {
     background: var(--log-bg); color: var(--text-dim);
-    border: 1px solid var(--border-soft); border-radius: var(--radius);
+    border: 1px solid var(--border); border-radius: var(--radius);
     padding: 18px; font-family: var(--mono); font-size: 12px; line-height: 1.65;
     height: 420px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
   }
@@ -540,14 +517,10 @@
   /* ── Laufanzeige ─────────────────────────────────────────────────────── */
   .running-badge {
     display: inline-flex; align-items: center; gap: 8px;
-    background: var(--green-bg); color: var(--green);
-    padding: 6px 13px; border-radius: 20px; font-size: 12.5px; font-weight: 600;
+    background: var(--info-bg); color: var(--info);
+    padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 500;
   }
-  .pulse { width: 7px; height: 7px; background: var(--green); border-radius: 50%; animation: pulse 1.4s var(--ease) infinite; }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(61,220,151,.5); }
-    50%      { opacity: .6; box-shadow: 0 0 0 6px rgba(61,220,151,0); }
-  }
+  .pulse { width: 6px; height: 6px; background: currentColor; border-radius: 50%; animation: blinken 1.4s ease-in-out infinite; }
 
   /* ── Verschiedenes ───────────────────────────────────────────────────── */
   .divider { height: 1px; background: var(--border-soft); margin: 24px 0; }
@@ -561,7 +534,7 @@
     position: fixed; bottom: 26px; right: 26px; z-index: 100;
     background: var(--surface-2); color: var(--text);
     border: 1px solid var(--border); border-left: 3px solid var(--accent);
-    padding: 13px 20px; border-radius: 11px;
+    padding: 13px 20px; border-radius: 8px;
     font-size: 13px; font-weight: 600; box-shadow: var(--shadow-lg);
     transform: translateY(20px) scale(.96); opacity: 0; pointer-events: none;
     transition: transform var(--base) var(--ease-out), opacity var(--base);
@@ -605,16 +578,16 @@
 
   .provider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; margin-bottom: 22px; }
   .provider-tile {
-    border: 1px solid var(--border); border-radius: 11px; padding: 15px;
+    border: 1px solid var(--border); border-radius: 8px; padding: 15px;
     cursor: pointer; display: flex; align-items: center; gap: 13px;
     background: var(--surface-2); position: relative;
     transition: border-color var(--fast), background var(--fast), transform var(--fast) var(--ease);
   }
-  .provider-tile:hover:not(.disabled) { border-color: var(--accent-strong); transform: translateY(-2px); }
+  .provider-tile:hover:not(.disabled) { border-color: var(--accent-strong); }
   .provider-tile.selected { border-color: var(--accent-strong); background: var(--accent-soft); }
   .provider-tile.disabled { opacity: .4; cursor: not-allowed; }
   .provider-tile-logo {
-    width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+    width: 40px; height: 40px; border-radius: 8px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px;
   }
   .provider-tile-name   { font-size: 12.5px; font-weight: 700; }
@@ -624,6 +597,121 @@
     background: var(--surface-3); color: var(--text-muted);
     font-size: 9.5px; font-weight: 700; padding: 3px 7px; border-radius: 5px;
     text-transform: uppercase; letter-spacing: .06em;
+  }
+
+  /* ── Zustandsmarken ──────────────────────────────────────────────────── */
+  .kopf-rechts { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-left: auto; }
+  .kopf-naechster { font-size: 13px; color: var(--text-muted); }
+  .zustand {
+    display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+    padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 500;
+    background: var(--surface-3); color: var(--text-dim);
+  }
+  .zustand.ok   { background: var(--green-bg);  color: var(--green); }
+  .zustand.info { background: var(--info-bg);   color: var(--info); }
+  .zustand.tag  { background: var(--tag-bg);    color: var(--tag); }
+  .zustand.warn { background: var(--yellow-bg); color: var(--yellow); }
+  .zustand.bad  { background: var(--red-bg);    color: var(--red); }
+  .zustand .punkt { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .zustand.info .punkt, .aktuell-box .punkt { animation: blinken 1.4s ease-in-out infinite; }
+  @keyframes blinken { 50% { opacity: .3; } }
+
+  /* ── Übersicht „Das braucht dich" und Laufansicht ────────────────────── */
+  .spalten { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .spalte-haupt { flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+  .spalte-neben { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+  .abschnitt-kopf { display: flex; align-items: center; gap: 10px; }
+  .abschnitt-kopf h2 { font-size: 20px; line-height: 28px; font-weight: 700; }
+  .zahl-marke {
+    background: var(--accent); color: var(--accent-ink); border-radius: 6px;
+    padding: 1px 8px; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+  .kasten { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+  .kasten-kopf { padding: 20px 24px; display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; }
+  .kasten h3 { font-size: 16px; line-height: 24px; font-weight: 700; }
+  .kasten-kopf p, .kasten-innen p { font-size: 14px; line-height: 1.5; color: var(--text-muted); margin-top: 4px; }
+  .kasten-innen { padding: 20px 24px; }
+  .zeile {
+    display: flex; align-items: center; gap: 16px; padding: 12px 24px;
+    border-top: 1px solid var(--border); font-size: 14px;
+  }
+  .zeile .wer { flex: 1; min-width: 0; font-weight: 500; }
+  .zeile .wer small {
+    display: block; font-size: 13px; font-weight: 400; color: var(--text-muted); margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .zeile .datum  { width: 88px; flex-shrink: 0; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .zeile .betrag { width: 96px; flex-shrink: 0; text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .zeile .tun { display: flex; gap: 8px; flex-shrink: 0; }
+  .btn-klein { min-height: 32px; padding: 0 12px; font-size: 13px; text-decoration: none; }
+  .kasten-fuss { border-top: 1px solid var(--border); background: var(--surface-2); padding: 10px 24px; font-size: 13px; }
+  .text-link {
+    background: none; border: none; padding: 0; cursor: pointer; font: inherit;
+    color: var(--text); font-weight: 500; text-decoration: underline; text-underline-offset: 3px;
+  }
+  .text-link:hover { color: var(--accent-strong); }
+  .balken-zeile { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; margin: 16px 0 6px; }
+  .balken-zeile b { font-weight: 500; font-variant-numeric: tabular-nums; }
+  .balken { height: 8px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
+  .balken > i { display: block; height: 100%; border-radius: 4px; background: var(--primary); transition: width var(--slow) var(--ease); }
+  .wert-zeile {
+    display: flex; justify-content: space-between; gap: 16px; padding: 10px 0;
+    border-top: 1px solid var(--border); font-size: 14px;
+  }
+  .wert-zeile:first-of-type { margin-top: 12px; }
+  .wert-zeile span:first-child { color: var(--text-muted); }
+  .wert-zeile span:last-child  { font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+  .verb { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border); font-size: 14px; }
+  .verb:first-of-type { margin-top: 12px; }
+  .verb i { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; background: var(--green); }
+  .verb.aus i { background: var(--red); }
+  .verb b { font-weight: 500; display: block; }
+  .verb small { font-size: 13px; color: var(--text-muted); }
+  .ereignis {
+    padding: 10px 0; border-top: 1px solid var(--border); font-size: 13px; line-height: 1.45;
+    color: var(--text-dim); overflow-wrap: anywhere;
+  }
+  .ereignis:first-of-type { margin-top: 12px; }
+  .leer-kasten {
+    background: var(--yellow-soft); border: 1px solid var(--accent); border-radius: var(--radius);
+    padding: 32px; display: flex; gap: 20px; align-items: flex-start;
+  }
+  .leer-zeichen {
+    width: 48px; height: 48px; border-radius: 12px; flex-shrink: 0;
+    background: var(--accent); color: var(--accent-ink);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .leer-kasten h2 { font-size: 20px; line-height: 28px; font-weight: 700; }
+  .leer-kasten p  { font-size: 14px; line-height: 1.55; color: var(--text-dim); margin-top: 6px; max-width: 60ch; }
+
+  .schritt { display: flex; gap: 16px; padding: 20px 24px; border-top: 1px solid var(--border); }
+  .schritt:first-child { border-top: none; }
+  .schritt.aktiv { background: var(--surface-2); }
+  .schritt > div:last-child { flex: 1; min-width: 0; }
+  .schritt-kreis {
+    width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--hover-line); color: var(--text-muted);
+    font-size: 13px; font-weight: 600;
+  }
+  .schritt.fertig .schritt-kreis { background: var(--primary); border-color: var(--primary); color: var(--bg); }
+  .schritt.aktiv  .schritt-kreis { background: var(--accent);  border-color: var(--accent);  color: var(--accent-ink); }
+  .schritt-titel { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 16px; line-height: 28px; font-weight: 700; }
+  .schritt.wartet .schritt-titel { color: var(--text-muted); }
+  .schritt-text { font-size: 14px; line-height: 1.5; color: var(--text-muted); margin-top: 2px; }
+  .aktuell-box {
+    margin-top: 12px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface); display: flex; align-items: center; gap: 12px; font-size: 14px;
+  }
+  .aktuell-box .punkt { width: 8px; height: 8px; border-radius: 50%; background: var(--info); flex-shrink: 0; }
+  .aktuell-box .wer { flex: 1; min-width: 0; font-weight: 500; }
+  .aktuell-box .datum, .aktuell-box .betrag { font-variant-numeric: tabular-nums; }
+  .aktuell-box .datum { color: var(--text-muted); }
+  @media (max-width: 620px) {
+    .zeile { flex-wrap: wrap; gap: 6px 16px; }
+    .zeile .wer { flex-basis: 100%; }
+    .zeile .betrag { margin-left: auto; }
+    .leer-kasten { flex-direction: column; }
   }
 
   /* ── Auftritt: Inhalte steigen gestaffelt ein ────────────────────────── */
@@ -645,13 +733,12 @@
     .invoice-layout { grid-template-columns: 1fr; height: auto; }
   }
   @media (max-width: 760px) {
-    .sidebar { width: 68px; min-width: 68px; }
+    .sidebar { width: 64px; min-width: 64px; }
     .sidebar-logo > div:last-child, .logo-text, .logo-sub,
     .nav-item span:not(.nav-icon):not(.nav-badge),
     .sidebar-search, .sidebar-section-label, .user-chip > div:last-child { display: none; }
     .nav-item { justify-content: center; }
     .content, .topbar { padding-left: 18px; padding-right: 18px; }
-    .greeting { font-size: 24px; }
   }
 
   /* ── Bewegung abschaltbar ────────────────────────────────────────────── */
@@ -662,7 +749,6 @@
     }
   }
 </style>
-</style>
 </head>
 <body>
 <div class="app">
@@ -670,7 +756,7 @@
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <div class="logo-icon">BB</div>
+      <div class="logo-icon">B</div>
       <div>
         <div class="logo-text">BillBridge</div>
         <div class="logo-sub">Rechnungen · automatisch</div>
@@ -785,107 +871,277 @@ function zeitAus(text) {
   return m ? m[1] : '–';
 }
 
-async function renderDashboard() {
-  const data = await fetchJSON('/api/dashboard');
-  const main = document.getElementById('mainContent');
+// ── Übersicht „Das braucht dich" und Laufansicht ────────────────────────────
+let ueDaten = null;          // letzte Antwort von /api/uebersicht
+let ueOffen = {};            // welche Karten ganz ausgeklappt sind
+let laufArt = null;          // 'moss' | 'sonst' – für die Abschlussmeldung
+const UE_ZEILEN = 5;
 
-  const initials = data.user_name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
-  document.getElementById('userAvatar').textContent = initials;
-  document.getElementById('userName').textContent = data.user_name;
+function ueEsc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => (
+    {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
 
-  const nextRunLabel = data.next_run;
+// "2026-11-09T10:54:00" -> "heute, 10:54" / "gestern, 10:54" / "07.11., 10:54"
+function ueWann(iso) {
+  const d = new Date(iso);
+  if (!iso || isNaN(d)) return '';
+  const tag = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((tag(new Date()) - tag(d)) / 86400000);
+  const uhr = d.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'});
+  if (diff === 0) return `heute, ${uhr}`;
+  if (diff === 1) return `gestern, ${uhr}`;
+  return `${d.toLocaleDateString('de-DE', {day: '2-digit', month: '2-digit'})}, ${uhr}`;
+}
 
-  main.innerHTML = `
+function ueDauer(sek) {
+  if (sek == null) return '';
+  if (sek < 60) return `${sek} Sekunden`;
+  const m = Math.floor(sek / 60);
+  return m === 1 ? '1 Minute' : `${m} Minuten`;
+}
+
+function ueZustand(s) {
+  if (!s.running) return `<span class="zustand ok"><span class="punkt"></span>Bereit</span>`;
+  const f = s.fortschritt || {};
+  const text = f.art === 'moss' && f.schritt_nr
+    ? `Abgleich läuft · Schritt ${f.schritt_nr} von ${f.schritt_anzahl}`
+    : 'Läuft gerade';
+  return `<span class="zustand info"><span class="punkt"></span>${text}</span>`;
+}
+
+function ueKopf(d, s) {
+  return `
     <div class="topbar">
       <div class="topbar-title">BillBridge — <span>Übersicht</span></div>
-      <div style="display:flex;gap:10px;align-items:center">
-        ${data.running ? `<div class="running-badge"><div class="pulse"></div> Läuft gerade…</div>` : ''}
-        <button class="btn btn-primary" onclick="triggerRun(false)" ${data.running ? 'disabled' : ''} id="syncBtn">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg>
-          Jetzt synchronisieren
-        </button>
+      <div class="kopf-rechts">
+        <span id="ueZustand">${ueZustand(s)}</span>
+        ${d.next_run ? `<span class="kopf-naechster">Nächster automatischer Lauf ${ueEsc(d.next_run)}</span>` : ''}
+        <button class="btn btn-primary" onclick="triggerRun(false)" ${s.running ? 'disabled' : ''} id="syncBtn">Jetzt synchronisieren</button>
       </div>
-    </div>
-    <div class="content">
-      <div class="greeting">Hallo, ${data.user_name.split(' ')[0]}</div>
-      <div class="greeting-sub">
-        ${data.running
-          ? 'BillBridge läuft gerade – neue Rechnungen werden geholt…'
-          : data.last_run
-            ? `Letzter Lauf: ${data.last_run} · ${data.last_new_count > 0 ? data.last_new_count + ' neue Rechnung(en)' : 'keine neuen Rechnungen'} · ${data.last_count} insgesamt`
-            : 'Noch kein Lauf gestartet. Klick auf <a href="#" onclick="triggerRun(false);return false;">Jetzt synchronisieren</a>.'
-        }
+    </div>`;
+}
+
+async function renderDashboard() {
+  const [d, s] = await Promise.all([fetchJSON('/api/uebersicht'), fetchJSON('/api/status')]);
+  ueDaten = d;
+  const initials = d.user_name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  document.getElementById('userAvatar').textContent = initials;
+  document.getElementById('userName').textContent = d.user_name;
+
+  const main = document.getElementById('mainContent');
+  if (s.running) {
+    main.innerHTML = ueKopf(d, s) + `<div class="content"><div id="laufInhalt">${laufInhalt(s)}</div></div>`;
+    if (!runPoller) startPolling();
+    return;
+  }
+  main.innerHTML = ueKopf(d, s) + `<div class="content">${uebersichtInhalt(d, s)}</div>`;
+}
+
+function ueKarte(kennung, titel, text, marke, zeilen, zeileHtml) {
+  if (!zeilen.length) return '';
+  const alle = ueOffen[kennung];
+  const sichtbar = alle ? zeilen : zeilen.slice(0, UE_ZEILEN);
+  const rest = zeilen.length - UE_ZEILEN;
+  return `
+    <section class="kasten">
+      <div class="kasten-kopf">
+        <div><h3>${titel}</h3><p>${text}</p></div>
+        ${marke}
       </div>
+      ${sichtbar.map(zeileHtml).join('')}
+      ${rest > 0 ? `<div class="kasten-fuss"><button class="text-link" onclick="ueKlappe('${kennung}')">${
+        alle ? 'Weniger anzeigen' : `${rest} weitere anzeigen`}</button></div>` : ''}
+    </section>`;
+}
 
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-label">Anbieter</div>
-          <div class="stat-value">${data.providers.length}</div>
-          <div class="stat-sub">Amazon aktiv</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Rechnungen</div>
-          <div class="stat-value">${data.total_invoices}</div>
-          <div class="stat-sub">lokal gespeichert</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">An Slack gesendet</div>
-          <div class="stat-value stat-yellow">${data.seen_count}</div>
-          <div class="stat-sub">eindeutige Bestellungen</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Nächster Lauf</div>
-          <div class="stat-value">${zeitAus(data.next_run)}</div>
-          <div class="stat-sub">${data.next_run}</div>
-        </div>
-      </div>
+function ueKlappe(kennung) {
+  ueOffen[kennung] = !ueOffen[kennung];
+  renderDashboard();
+}
 
-      <div class="two-col">
-        <div class="card">
-          <div class="card-title">Letzte Läufe</div>
-          <div class="card-sub">Alle Läufe</div>
-          ${data.recent_invoices.length === 0
-            ? `<div class="empty-state"><div class="emoji"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/></svg></div><h3>Noch keine Rechnungen</h3><p>Starte einen Sync um Rechnungen zu holen.</p></div>`
-            : data.recent_invoices.map(inv => `
-              <div class="run-item">
-                <div class="run-dot green"></div>
-                <div>
-                  <div class="run-label">Amazon · ${inv.order_id}</div>
-                  <div class="run-sub">${inv.size_kb} KB · PDF</div>
-                </div>
-                <div class="run-meta">${inv.date}</div>
-              </div>
-            `).join('')
-          }
-        </div>
+function uebersichtInhalt(d, s) {
+  const st = d.stand || {};
+  const zeilen = [];
+  if (st.zeit) zeilen.push(`Letzter Moss-Abgleich ${ueWann(st.zeit)}${st.gesamt != null ? ` · ${st.gesamt} Transaktionen in Moss geprüft` : ''}`);
+  else if (s.last_run) zeilen.push(`Letzter Lauf ${ueEsc(s.last_run)}`);
+  else zeilen.push('BillBridge holt Rechnungen, hängt sie in Moss an und meldet sich in Slack, wenn es dich braucht.');
 
+  const links = d.anzahl > 0 ? `
+      <div class="abschnitt-kopf"><h2>Das braucht dich</h2><span class="zahl-marke">${d.anzahl}</span></div>
+      ${ueKarte('offen', 'Buchungstext wartet auf deine Antwort',
+        'BillBridge hat in Slack einen Text vorgeschlagen. Antworte im Thread – beim nächsten Abgleich wird er in Moss eingetragen.',
+        '<span class="zustand tag">Slack</span>', d.offen, z => `
+        <div class="zeile">
+          <div class="wer">${ueEsc(z.haendler)}</div>
+          <div class="datum">${ueEsc(z.datum)}</div>
+          <div class="betrag">${ueEsc(z.betrag)}</div>
+          <div class="tun">${z.link ? `<a class="btn btn-ghost btn-klein" href="${ueEsc(z.link)}" target="_blank" rel="noopener">Thread öffnen</a>` : ''}</div>
+        </div>`)}
+      ${ueKarte('gesperrt', 'In Moss gesperrt – Text von Hand eintragen',
+        'Diese Transaktionen kann BillBridge in Moss nicht mehr bearbeiten. Kopiere den Text, trag ihn in Moss ein und hak die Zeile hier ab.',
+        '<span class="zustand warn">Von Hand</span>', d.gesperrt, (z, i) => `
+        <div class="zeile">
+          <div class="wer">${ueEsc(z.haendler)}<small title="${ueEsc(z.text)}">${ueEsc(z.text) || 'kein Textvorschlag gespeichert'}</small></div>
+          <div class="datum">${ueEsc(z.datum)}</div>
+          <div class="betrag">${ueEsc(z.betrag)}</div>
+          <div class="tun">
+            ${z.text ? `<button class="btn btn-ghost btn-klein" onclick="ueKopiere(${i})">Text kopieren</button>` : ''}
+            <button class="btn btn-ghost btn-klein" onclick="ueErledigt(${i})">Erledigt</button>
+          </div>
+        </div>`)}
+      ${ueKarte('ohne_beleg', 'Beleg fehlt',
+        'Beim letzten Abgleich blieben diese Transaktionen in Moss ohne Beleg.',
+        '<span class="zustand bad">Beleg</span>', d.ohne_beleg, z => `
+        <div class="zeile">
+          <div class="wer">${ueEsc(z.haendler)}<small>${ueEsc(z.hinweis)}</small></div>
+          <div class="datum">${ueEsc(z.datum)}</div>
+          <div class="betrag">${ueEsc(z.betrag)}</div>
+        </div>`)}` : `
+      <div class="leer-kasten">
+        <div class="leer-zeichen"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
         <div>
-          <div class="card">
-            <div class="card-title">Anbieter Status</div>
-            <div style="margin-top:10px">
-              ${data.providers.map(p => `
-                <div class="provider-item">
-                  <div class="provider-logo" style="background:${p.color}20;color:${p.color}">${p.name.slice(0,2).toUpperCase()}</div>
-                  <div>
-                    <div class="provider-name">${p.name}</div>
-                    <div class="provider-status"><span class="status-dot green"></span>aktiv</div>
-                  </div>
-                  <div class="provider-count">${p.count}</div>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-          <div class="next-run-card" style="margin-top:16px">
-            <div class="next-run-label">Nächster automatischer Lauf</div>
-            <div class="next-run-time">${zeitAus(data.next_run)} Uhr</div>
-            <div class="next-run-sub">Läuft werktäglich · ${data.next_run}</div>
-          </div>
+          <h2>Nichts steht an</h2>
+          <p>${st.zeit
+            ? 'Alle Belege hängen an den Transaktionen, alle Buchungstexte sind eingetragen. BillBridge meldet sich in Slack, sobald wieder etwas deine Antwort braucht.'
+            : 'Kein Buchungstext wartet auf dich. BillBridge meldet sich in Slack, sobald wieder etwas deine Antwort braucht.'}</p>
         </div>
       </div>
-    </div>
-  `;
+      <section class="kasten">
+        <div class="kasten-kopf"><div><h3>Zuletzt erledigt</h3></div></div>
+        ${d.erledigt.length ? d.erledigt.map(e => `
+          <div class="zeile"><div class="wer">${ueEsc(e.text)}</div><div class="datum" style="width:auto">${ueWann(e.wann)}</div></div>`).join('')
+          : '<div class="zeile"><div class="wer" style="font-weight:400;color:var(--text-muted)">Noch nichts erledigt.</div></div>'}
+        <div class="kasten-fuss"><button class="text-link" onclick="navigate('invoices')">Alle Rechnungen anzeigen</button></div>
+      </section>`;
 
-  if (data.running && !runPoller) startPolling();
+  const balken = (st.balken || []).map(b => `
+        <div class="balken-zeile"><span>${ueEsc(b.name)}</span><b>${b.ist} von ${b.von}</b></div>
+        <div class="balken" role="img" aria-label="${ueEsc(b.name)}: ${b.ist} von ${b.von}"><i style="width:${b.von ? Math.round(b.ist / b.von * 100) : 0}%"></i></div>`).join('');
+
+  return `
+    <div class="greeting">Hallo, ${ueEsc(d.user_name.split(' ')[0])}</div>
+    <div class="greeting-sub">${zeilen.join(' · ')}</div>
+    <div class="spalten">
+      <div class="spalte-haupt">${links}</div>
+      <div class="spalte-neben">
+        <section class="kasten"><div class="kasten-innen">
+          <h3>Stand in Moss</h3>
+          ${balken || '<p>Die Zahlen erscheinen nach dem nächsten Moss-Abgleich.</p>'}
+          <div class="wert-zeile" style="margin-top:16px"><span>Buchungstexte eingetragen</span><span>${st.texte_eingetragen ?? 0}</span></div>
+          <div class="wert-zeile"><span>Rechnungen im Ordner</span><span>${d.rechnungen}</span></div>
+          <div style="margin-top:16px">
+            ${d.moss_fenster
+              ? '<button class="btn btn-ghost" onclick="mossReconcile()">Moss-Abgleich starten</button>'
+              : `<p style="margin:0">Für einen Abgleich muss das Moss-Fenster offen sein. <button class="text-link" onclick="navigate('providers')">Zu den Anbietern</button></p>`}
+          </div>
+        </div></section>
+        ${d.hinweise.length ? `
+        <section class="kasten"><div class="kasten-innen">
+          <h3>Hinweise</h3>
+          ${d.hinweise.map(h => `<div class="ereignis">${ueEsc(h.text || h)}</div>`).join('')}
+        </div></section>` : ''}
+        <section class="kasten"><div class="kasten-innen">
+          <h3>Verbindungen</h3>
+          ${d.verbindungen.map(v => `
+            <div class="verb ${v.ok ? '' : 'aus'}"><i></i><div><b>${ueEsc(v.name)}</b><small>${ueEsc(v.text)}</small></div></div>`).join('')}
+        </div></section>
+      </div>
+    </div>`;
+}
+
+async function ueKopiere(i) {
+  const z = ueDaten && ueDaten.gesperrt[i];
+  if (!z) return;
+  try {
+    await navigator.clipboard.writeText(z.text);
+    showToast('Text kopiert', 'success');
+  } catch (e) {
+    showToast('⚠ Kopieren nicht möglich – Text bitte von Hand markieren');
+  }
+}
+
+async function ueErledigt(i) {
+  const z = ueDaten && ueDaten.gesperrt[i];
+  if (!z) return;
+  const r = await fetch('/api/vorschlag_erledigt', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ts: z.ts})
+  });
+  const antwort = await r.json();
+  if (antwort.ok) showToast(`Abgehakt: ${z.haendler}, ${z.betrag}`, 'success');
+  else showToast('⚠ ' + (antwort.error || 'Fehler'));
+  renderDashboard();
+}
+
+// Laufansicht: wird alle zwei Sekunden neu gefüllt, solange ein Lauf aktiv ist.
+function laufInhalt(s) {
+  const f = s.fortschritt || {schritte: [], zaehler: [], ereignisse: []};
+  const marke = {fertig: '<span class="zustand ok">Fertig</span>',
+                 aktiv:  '<span class="zustand info">Läuft</span>',
+                 wartet: '<span class="zustand">Wartet</span>'};
+  const schritte = f.schritte.map((x, i) => {
+    const p = x.fortschritt;
+    const a = x.aktuell;
+    return `
+      <div class="schritt ${x.zustand}">
+        <div class="schritt-kreis">${x.zustand === 'fertig'
+          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'
+          : i + 1}</div>
+        <div>
+          <div class="schritt-titel">${ueEsc(x.titel)} ${marke[x.zustand] || ''}</div>
+          <div class="schritt-text">${ueEsc(x.ergebnis)}</div>
+          ${p && p.von ? `
+            <div class="balken-zeile" style="margin-top:12px"><span>Transaktion ${p.ist} von ${p.von}</span><b>${Math.round(p.ist / p.von * 100)} %</b></div>
+            <div class="balken"><i style="width:${Math.round(p.ist / p.von * 100)}%"></i></div>` : ''}
+          ${a ? `
+            <div class="aktuell-box">
+              <span class="punkt"></span>
+              <div class="wer">${ueEsc(a.haendler)}</div>
+              <div class="datum">${ueEsc(a.datum)}</div>
+              <div class="betrag">${ueEsc(a.betrag)} €</div>
+            </div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+
+  const ereignisse = f.ereignisse.length
+    ? f.ereignisse.map(e => `<div class="ereignis">${ueEsc(e)}</div>`).join('')
+    : '<p>Noch keine Meldung.</p>';
+
+  return `
+    <div class="greeting">${ueEsc(f.titel || 'BillBridge arbeitet')}</div>
+    <div class="greeting-sub">${s.started ? `Gestartet um ${s.started} Uhr · läuft seit ${ueDauer(s.seconds)} · ` : ''}du kannst das Fenster offen lassen und weiterarbeiten</div>
+    <div class="spalten">
+      <div class="spalte-haupt">
+        ${schritte ? `<section class="kasten">${schritte}</section>` : `
+        <section class="kasten"><div class="kasten-innen">
+          <h3>Zuletzt passiert</h3>
+          ${ereignisse}
+          <div style="margin-top:16px"><button class="text-link" onclick="navigate('logs')">Vollständiges Protokoll</button></div>
+        </div></section>`}
+      </div>
+      <div class="spalte-neben">
+        ${f.zaehler.length ? `
+        <section class="kasten"><div class="kasten-innen">
+          <h3>Bisher in diesem Lauf</h3>
+          ${f.zaehler.map(z => `<div class="wert-zeile"><span>${ueEsc(z.name)}</span><span>${ueEsc(z.wert)}</span></div>`).join('')}
+        </div></section>` : ''}
+        ${schritte ? `
+        <section class="kasten"><div class="kasten-innen">
+          <h3>Zuletzt passiert</h3>
+          ${ereignisse}
+          <div style="margin-top:16px"><button class="text-link" onclick="navigate('logs')">Vollständiges Protokoll</button></div>
+        </div></section>` : ''}
+      </div>
+    </div>`;
+}
+
+function aktualisiereLauf(s) {
+  const ziel = document.getElementById('laufInhalt');
+  if (!ziel) return renderDashboard();   // Übersicht stand noch im Ruhezustand
+  ziel.innerHTML = laufInhalt(s);
+  const z = document.getElementById('ueZustand');
+  if (z) z.innerHTML = ueZustand(s);
 }
 
 // ── Invoices ─────────────────────────────────────────────────────────────────
@@ -1523,20 +1779,10 @@ async function mossReconcile() {
   });
   const data = await resp.json();
   if (data.ok) {
-    showToast('⏳ Moss-Abgleich läuft…');
-    const poller = setInterval(async () => {
-      const s = await fetchJSON('/api/status');
-      if (!s.running) {
-        clearInterval(poller);
-        const last = s.log[s.log.length - 1] || '';
-        if (last.includes('✅')) {
-          showToast('✅ Moss-Abgleich abgeschlossen!', 'success');
-        } else {
-          showToast('⚠ ' + last);
-        }
-        renderProviders();
-      }
-    }, 1500);
+    laufArt = 'moss';
+    startPolling();
+    // kurz warten, bis der Lauf serverseitig angelaufen ist, dann die Laufansicht zeigen
+    setTimeout(() => navigate('dashboard'), 500);
   } else {
     showToast('⚠ ' + (data.error || 'Fehler'));
   }
@@ -1636,10 +1882,19 @@ function startPolling() {
     if (!s.running) {
       clearInterval(runPoller);
       runPoller = null;
-      showToast(`✅ Sync abgeschlossen · ${s.last_new_count > 0 ? s.last_new_count + ' neue Rechnung(en)' : 'keine neuen Rechnungen'}`, 'success');
+      const letzte = s.log[s.log.length - 1] || '';
+      if (laufArt === 'moss') {
+        if (letzte.includes('✅')) showToast('✅ Moss-Abgleich abgeschlossen', 'success');
+        else showToast('⚠ ' + letzte);
+      } else {
+        showToast(`✅ Sync abgeschlossen · ${s.last_new_count > 0 ? s.last_new_count + ' neue Rechnung(en)' : 'keine neuen Rechnungen'}`, 'success');
+      }
+      laufArt = null;
       renderPage(currentPage);
-    } else if (currentPage === 'logs') {
-      renderLogs();
+    } else {
+      laufArt = (s.fortschritt || {}).art || laufArt;
+      if (currentPage === 'logs') renderLogs();
+      else if (currentPage === 'dashboard') aktualisiereLauf(s);
     }
   }, 2000);
 }
