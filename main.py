@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 from dotenv import load_dotenv
 
+import belegpruefung
+
 load_dotenv()
 
 AMAZON_EMAIL = os.getenv("AMAZON_EMAIL")
@@ -28,6 +30,22 @@ MONTHS_BACK = int(os.getenv("MONTHS_BACK", "1"))
 
 DOWNLOAD_DIR = Path("invoices")
 SEEN_FILE = Path("seen_invoices.txt")
+
+
+_RECHNUNG_GEPRUEFT: dict = {}
+
+
+def _ist_rechnung(pfad: Path) -> tuple:
+    """(ist_rechnung, grund). Finance nimmt nur Rechnungen als Beleg – keine
+    Lieferscheine oder Bestellbestätigungen. Je Datei nur einmal lesen."""
+    try:
+        st = pfad.stat()
+        schluessel = (str(pfad), st.st_size, st.st_mtime)
+    except OSError:
+        return False, "Datei fehlt"
+    if schluessel not in _RECHNUNG_GEPRUEFT:
+        _RECHNUNG_GEPRUEFT[schluessel] = belegpruefung.pruefe_pdf(pfad)
+    return _RECHNUNG_GEPRUEFT[schluessel]
 
 
 def load_seen_order_ids() -> set:
@@ -565,6 +583,16 @@ def _download_pdf(page, context, pdf_url: str, order_id: str, date_token: str, p
         tmp = DOWNLOAD_DIR / f".tmp_{order_id}_{part}.pdf"
         tmp.write_bytes(response.body())
 
+        # Amazon liefert unter demselben Link manchmal nur den "Elektronischen
+        # Lieferschein" (Rechnung des Händlers noch nicht da). Der darf nicht
+        # als Beleg weiterlaufen; die Bestellung bleibt unerledigt und wird
+        # beim nächsten Lauf erneut versucht.
+        ist_rechnung, grund = _ist_rechnung(tmp)
+        if not ist_rechnung:
+            tmp.unlink(missing_ok=True)
+            print(f"    Keine Rechnung ({grund}) – nicht übernommen, nächster Lauf versucht es erneut.")
+            return None
+
         pdf_amount = extract_invoice_amount(tmp)
         token = f"{pdf_amount:.2f}EUR" if pdf_amount is not None else price_token
         suffix = f"-{part + 1}" if part else ""
@@ -784,6 +812,11 @@ def _scrape_galaxus(provider: dict, headless: bool = True) -> list[Path]:
                 dl.save_as(str(dest))
                 # Prüfe ob echtes PDF
                 if dest.stat().st_size > 1000 and dest.read_bytes()[:4] == b"%PDF":
+                    ist_rechnung, grund = _ist_rechnung(dest)
+                    if not ist_rechnung:
+                        print(f"    Keine Rechnung ({grund}) – nicht übernommen.")
+                        dest.unlink(missing_ok=True)
+                        continue
                     # Datum + Betrag aus der PDF in den Dateinamen aufnehmen,
                     # damit der Moss-Abgleich per Betrag matchen kann.
                     amount = extract_invoice_amount(dest)
@@ -849,6 +882,17 @@ def post_to_slack(files: list[Path]) -> None:
     from slack_sdk import WebClient
     from slack_sdk.errors import SlackApiError
 
+    # Letzte Schranke vor Moss: Was hier durchgeht, ordnet die Moss-App einer
+    # Transaktion zu. Deshalb an dieser einen Stelle für alle Wege prüfen.
+    rechnungen = []
+    for pdf_path in files:
+        ist_rechnung, grund = _ist_rechnung(pdf_path)
+        if ist_rechnung:
+            rechnungen.append(pdf_path)
+        else:
+            print(f"Nicht nach Slack: {pdf_path.name} – keine Rechnung ({grund}).")
+    files = rechnungen
+
     if not files:
         print("Keine Rechnungen zum Hochladen.")
         return
@@ -910,6 +954,7 @@ def download_gmail_invoices() -> list[Path]:
 
     # Übersprungene Anhänge nur zählen statt einzeln protokollieren.
     uebersprungen: Counter = Counter()
+    aussortiert: Counter = Counter()   # PDF-Anhänge, die keine Rechnung sind
 
     if not GMAIL_EMAIL or not GMAIL_APP_PASSWORD:
         print("Gmail: GMAIL_EMAIL und GMAIL_APP_PASSWORD nicht konfiguriert.")
@@ -963,6 +1008,7 @@ def download_gmail_invoices() -> list[Path]:
         from_name = re.sub(r'\W+', '_', from_name)[:30]
 
         found_pdf = False
+        geprueft = False
         for part in msg.walk():
             if part.get_content_maintype() == "multipart":
                 continue
@@ -1001,6 +1047,14 @@ def download_gmail_invoices() -> list[Path]:
                 counter += 1
 
             dest.write_bytes(payload)
+            geprueft = True
+            ist_rechnung, grund = _ist_rechnung(dest)
+            if not ist_rechnung:
+                # Lieferschein, Auftragsbestätigung, Preisliste …: gar nicht
+                # erst ablegen, sonst landet es über Slack in Moss.
+                dest.unlink(missing_ok=True)
+                aussortiert[grund] += 1
+                continue
             amount = extract_invoice_amount(dest)
             if amount is not None:
                 new_dest = dest.with_name(f"{dest.stem}_{amount:.2f}EUR.pdf")
@@ -1011,7 +1065,7 @@ def download_gmail_invoices() -> list[Path]:
             downloaded.append(dest)
             found_pdf = True
 
-        if found_pdf:
+        if found_pdf or geprueft:
             save_seen_order_id(dedup_key)
 
     mail.logout()
@@ -1021,6 +1075,10 @@ def download_gmail_invoices() -> list[Path]:
         print(f"Gmail: {sum(uebersprungen.values())} Anhang/Anhänge übersprungen "
               f"(AGB, Widerrufsformular o.ä.): {beispiele}"
               + (" …" if len(uebersprungen) > 3 else ""))
+    if aussortiert:
+        print(f"Gmail: {sum(aussortiert.values())} PDF-Anhang/Anhänge sind keine Rechnung und "
+              f"wurden nicht übernommen: "
+              + ", ".join(f"{grund} ({n}x)" for grund, n in aussortiert.most_common()))
     print(f"Gmail: {len(downloaded)} neue Rechnung(en) heruntergeladen.")
     return downloaded
 
@@ -1304,13 +1362,21 @@ def _beleg_fehlt(row: dict) -> bool:
     return (row.get("receipt_status") or "").strip().lower().startswith("fehlt")
 
 
-def _find_local_invoice_for_amount(amount: float, tx_date: Optional[datetime]) -> Optional[Path]:
+def _find_local_invoice_for_amount(amount: float, tx_date: Optional[datetime],
+                                   vergeben=None, gruende: Optional[list] = None) -> Optional[Path]:
     """Sucht eine bereits heruntergeladene Rechnung mit passendem Betrag
     (Abweichung höchstens MOSS_MATCH_CENT_TOLERANCE Cent, standardmäßig also
     betragsgleich) UND einem Datum innerhalb von MOSS_MATCH_WINDOW_DAYS um
     das Buchungsdatum. Bei mehreren Treffern gewinnt das nächste Datum.
     Ohne bekanntes Buchungsdatum ist das Fenster nicht prüfbar – dann
-    entscheidet weiterhin allein der Betrag."""
+    entscheidet weiterhin allein der Betrag.
+
+    Zwei Dinge scheiden einen Treffer aus: Die PDF ist keine Rechnung, oder
+    sie hängt schon an einer anderen Transaktion (`vergeben(pfad)` ist wahr).
+    Eine Rechnung belegt genau eine Zahlung – bei zwei betragsgleichen
+    Transaktionen bekommt die zweite die nächste passende Rechnung oder keine.
+    In `gruende` steht danach, warum nichts zugeordnet wurde."""
+    gruende = gruende if gruende is not None else []
     # In ganzen Cent rechnen: 0.02 als Float-Vergleich ist unzuverlässig,
     # und bei Toleranz 0 muss "gleich" auch wirklich gleich heißen.
     ziel_cent = round(amount * 100)
@@ -1325,6 +1391,16 @@ def _find_local_invoice_for_amount(amount: float, tx_date: Optional[datetime]) -
             continue
         diff = abs(file_cent - ziel_cent)
         if diff <= MOSS_MATCH_CENT_TOLERANCE:
+            ist_rechnung, grund = _ist_rechnung(p)
+            if not ist_rechnung:
+                print(f"    Betrag passt, ist aber keine Rechnung ({grund}): {p.name} – nicht zugeordnet.")
+                gruende.append(f"Dokument im Ordner ist keine Rechnung ({grund})")
+                continue
+            if vergeben and vergeben(p):
+                print(f"    Betrag passt, Rechnung hängt aber schon an einer anderen "
+                      f"Transaktion: {p.name} – nicht noch einmal zugeordnet.")
+                gruende.append("passende Rechnung hängt schon an einer anderen Transaktion")
+                continue
             candidates.append(p)
         elif diff <= 2:
             knapp_daneben.append((p, diff))
@@ -1361,6 +1437,46 @@ def _find_local_invoice_for_amount(amount: float, tx_date: Optional[datetime]) -
     return min(in_window, key=lambda t: t[1])[0]
 
 
+# Welche Rechnung an welcher Transaktion hängt – nach Inhalt statt Dateiname,
+# damit dieselbe PDF unter zweitem Namen (Mail-Anhang doppelt, umbenannt)
+# nicht noch einmal als Beleg durchgeht.
+MOSS_ZUORDNUNG_FILE = Path("moss_zuordnung.json")
+
+
+def _lade_zuordnung() -> dict:
+    try:
+        daten = json.loads(MOSS_ZUORDNUNG_FILE.read_text())
+        return daten if isinstance(daten, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _merke_zuordnung(pfad: Path, row: dict) -> None:
+    kennung = belegpruefung.inhalt_kennung(pfad)
+    if not kennung:
+        return
+    daten = _lade_zuordnung()
+    daten[kennung] = {**_stand_zeile(row), "datei": pfad.name, "row_id": row.get("row_id"),
+                      "zeit": datetime.now().isoformat(timespec="seconds")}
+    daten[kennung].pop("grund", None)
+    try:
+        MOSS_ZUORDNUNG_FILE.write_text(json.dumps(daten, indent=2, ensure_ascii=False))
+    except OSError as e:
+        print(f"    Zuordnung nicht speicherbar: {e}")
+
+
+def _vergebene_belege() -> tuple:
+    """(Dateinamen, {Inhaltskennung: row_id}) aller schon hochgeladenen Belege.
+    Bei Einträgen aus der Zeit vor moss_zuordnung.json ist die row_id None."""
+    namen = _load_moss_sent()
+    kennungen = {k: (rec or {}).get("row_id") for k, rec in _lade_zuordnung().items()}
+    for name in namen:
+        pfad = DOWNLOAD_DIR / name
+        if pfad.exists():
+            kennungen.setdefault(belegpruefung.inhalt_kennung(pfad), None)
+    return namen, kennungen
+
+
 def _load_moss_sent() -> set:
     if MOSS_SENT_FILE.exists():
         return set(MOSS_SENT_FILE.read_text().splitlines())
@@ -1375,6 +1491,30 @@ def _save_moss_sent(filename: str):
 # ── Buchungstext-Freigabe: Ablage der offenen Vorschläge ─────────────────────
 
 MOSS_PROPOSALS_FILE = Path("moss_proposals.json")
+
+# Ergebnis des letzten Abgleichs für die Übersicht in der Oberfläche. Vorher
+# stand es nur im Protokoll – die Oberfläche konnte nicht zeigen, was offen ist.
+MOSS_STAND_FILE = Path("moss_stand.json")
+# Zwischenwerte aus Phase 2, die sync_moss_open_invoices mit abspeichert.
+_LAUF_STAND: dict = {}
+
+
+def _stand_zeile(row: dict, grund: str = "") -> dict:
+    datum = row.get("date")
+    return {
+        "merchant": row.get("merchant") or "",
+        "amount": row.get("amount"),
+        "date": datum.strftime("%d.%m.%Y") if datum else "",
+        "grund": grund,
+    }
+
+
+def _speichere_moss_stand(stand: dict) -> None:
+    """Schreibt den Stand; ein Fehler hier darf den Abgleich nie kippen."""
+    try:
+        MOSS_STAND_FILE.write_text(json.dumps(stand, indent=2, ensure_ascii=False))
+    except OSError as e:
+        print(f"Moss: Stand für die Übersicht nicht speicherbar ({e}).")
 
 
 def _proposal_key(merchant: str, amount: float, date_str: str) -> str:
@@ -1816,6 +1956,7 @@ def _fill_missing_buchungstexte(page) -> list[dict]:
     all_rows = _moss_alle_zeilen(page)
     rows = [r for r in all_rows if r["needs_fields"]]
     print(f"Moss: {len(rows)} von {len(all_rows)} Transaktion(en) mit fehlenden Pflichtangaben.")
+    _LAUF_STAND.update(gesamt=len(all_rows), pflicht_offen=len(rows), ohne_produktzeilen=0)
     if all_rows and not rows:
         # Nicht stumm mit 0 Treffern rausgehen – dann wäre unklar, ob wirklich
         # nichts offen ist oder Moss die Beschriftung geändert hat.
@@ -1834,6 +1975,7 @@ def _fill_missing_buchungstexte(page) -> list[dict]:
         line_items = extract_invoice_line_items(match)
         if not line_items:
             print(f"  Keine Produktzeilen extrahierbar aus {match.name}.")
+            _LAUF_STAND["ohne_produktzeilen"] = _LAUF_STAND.get("ohne_produktzeilen", 0) + 1
             continue
         buchungstext = "; ".join(line_items)
         print(f"  Vorschlag (wartet auf Freigabe): {row['merchant']} ({row['amount']:.2f} €): {buchungstext[:60]}...")
@@ -2117,6 +2259,72 @@ def apply_buchungstexte_from_slack(page) -> dict:
     return result
 
 
+# ── Warnung: Transaktionen, die Handarbeit brauchen ──────────────────────────
+
+MOSS_GEMELDET_FILE = Path("moss_gemeldet.json")
+# Ganz frische Zahlungen noch nicht melden: Die Rechnung kommt oft erst mit
+# dem Versand, der nächste Lauf erledigt das von selbst.
+MOSS_WARN_AFTER_DAYS = int(os.getenv("MOSS_WARN_AFTER_DAYS", "3"))
+_WARNUNG_MAX_ZEILEN = 25
+
+
+def _handarbeit_kennung(row: dict) -> str:
+    datum = row["date"].strftime("%Y-%m-%d") if row.get("date") else "?"
+    return row.get("row_id") or f"{row.get('merchant')}|{row.get('amount')}|{datum}"
+
+
+def _neue_handarbeit(zeilen: list, gemeldet: dict, jetzt: datetime) -> list:
+    """Transaktionen, die alt genug und noch nicht gemeldet sind."""
+    neu = []
+    for row in zeilen:
+        if _handarbeit_kennung(row) in gemeldet:
+            continue
+        datum = row.get("date")
+        if datum and (jetzt - datum).days < MOSS_WARN_AFTER_DAYS:
+            continue
+        neu.append(row)
+    return neu
+
+
+def _handarbeit_text(zeilen: list) -> str:
+    n = len(zeilen)
+    kopf = (f":warning: *BillBridge: {n} Transaktion{'en brauchen' if n != 1 else ' braucht'} dich*\n"
+            "Dafür hat BillBridge keinen Beleg anhängen können. Bitte die Rechnung besorgen "
+            "und in Moss von Hand anhängen.")
+    punkte = []
+    for row in sorted(zeilen, key=lambda r: r.get("date") or datetime.min, reverse=True)[:_WARNUNG_MAX_ZEILEN]:
+        datum = row["date"].strftime("%d.%m.%Y") if row.get("date") else "Datum unbekannt"
+        punkte.append(f"• {datum} · {row.get('merchant') or '?'} · {_fmt_eur(row.get('amount') or 0)} €"
+                      f" – {row.get('_grund') or 'keine passende Rechnung im Ordner'}")
+    if n > _WARNUNG_MAX_ZEILEN:
+        punkte.append(f"… und {n - _WARNUNG_MAX_ZEILEN} weitere")
+    return "\n".join([kopf, *punkte, "_Die vollständige Liste steht in BillBridge auf der Übersicht._"])
+
+
+def melde_handarbeit(zeilen: list) -> int:
+    """Meldet jede Transaktion ohne Beleg genau einmal in Slack. Gibt die
+    Anzahl der neu gemeldeten zurück."""
+    try:
+        gemeldet = json.loads(MOSS_GEMELDET_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        gemeldet = {}
+    neu = _neue_handarbeit(zeilen, gemeldet, datetime.now())
+    if not neu:
+        return 0
+    kanal = _alert_channel()
+    if not (SLACK_BOT_TOKEN and kanal):
+        print(f"Moss: {len(neu)} Transaktion(en) brauchen Handarbeit – kein Slack-Kanal für die Warnung konfiguriert.")
+        return 0
+    from slack_sdk import WebClient
+    WebClient(token=SLACK_BOT_TOKEN).chat_postMessage(channel=kanal, text=_handarbeit_text(neu))
+    stempel = datetime.now().isoformat(timespec="seconds")
+    for row in neu:
+        gemeldet[_handarbeit_kennung(row)] = stempel
+    MOSS_GEMELDET_FILE.write_text(json.dumps(gemeldet, indent=2, ensure_ascii=False))
+    print(f"Moss: {len(neu)} Transaktion(en) ohne Beleg in Slack gemeldet.")
+    return len(neu)
+
+
 def sync_moss_open_invoices(page) -> dict:
     """
     Phase 1: Ruft die Moss-Ansicht 'Fehlende Belege' auf, gleicht offene Posten
@@ -2164,21 +2372,45 @@ def sync_moss_open_invoices(page) -> dict:
         print(f"Moss: {len(rows)} Transaktion(en) ohne Beleg "
               f"({uebergangen} mit vorhandenem oder ungültigem Beleg übergangen).")
 
-    already_done = _load_moss_sent()
+    _LAUF_STAND.clear()
+    ohne_beleg_anzahl = len(rows)
+    vergebene_namen, vergebene_kennungen = _vergebene_belege()
     done, already, unmatched, gesperrt = [], [], [], []
     phase1_proposals = []
 
+    def _vergeben_fuer(row_id):
+        # Eine Rechnung, die schon an einer ANDEREN Transaktion hängt, ist
+        # verbraucht. Hängt sie laut Ablage an genau dieser, liefert der
+        # Abgleich sie zurück und der Fall wird unten gesondert behandelt.
+        def pruefe(pfad: Path) -> bool:
+            kennung = belegpruefung.inhalt_kennung(pfad)
+            if kennung in vergebene_kennungen:
+                frueher = vergebene_kennungen[kennung]
+                return frueher is None or frueher != row_id
+            return pfad.name in vergebene_namen
+        return pruefe
+
     for row in rows:
-        match = _find_local_invoice_for_amount(row["amount"], row["date"])
+        gruende: list = []
+        match = _find_local_invoice_for_amount(row["amount"], row["date"],
+                                               vergeben=_vergeben_fuer(row.get("row_id")),
+                                               gruende=gruende)
         date_str = row["date"].strftime("%d.%m.%Y") if row["date"] else "?"
         if not match:
             print(f"  Kein lokaler Beleg für {row['merchant']} ({row['amount']:.2f} €, {date_str}).")
+            row["_grund"] = gruende[0] if gruende else "keine passende Rechnung im Ordner"
             unmatched.append(row)
             continue
-        if match.name in already_done:
-            already.append(row)
-            continue
         if not row.get("row_id"):
+            unmatched.append(row)
+            continue
+        if belegpruefung.inhalt_kennung(match) in vergebene_kennungen:
+            # Schon einmal genau hier hochgeladen, in Moss fehlt der Beleg
+            # trotzdem (wieder). Nicht stur erneut hochladen – das war der
+            # "immer wieder dieselbe Rechnung"-Fehler.
+            print(f"  {match.name} wurde für {row['merchant']} ({row['amount']:.2f} €, {date_str}) "
+                  f"schon einmal hochgeladen und fehlt in Moss wieder – kein zweiter Upload.")
+            row["_grund"] = "Beleg wurde schon einmal hochgeladen und fehlt in Moss wieder – bitte prüfen"
             unmatched.append(row)
             continue
 
@@ -2198,9 +2430,11 @@ def sync_moss_open_invoices(page) -> dict:
             continue
         if ausgang == "ok":
             _save_moss_sent(match.name)
+            _merke_zuordnung(match, row)
             # Auch im laufenden Durchgang sperren, damit dieselbe PDF nicht
             # zwei betragsgleichen Transaktionen zugeordnet wird.
-            already_done.add(match.name)
+            vergebene_namen.add(match.name)
+            vergebene_kennungen[belegpruefung.inhalt_kennung(match)] = row.get("row_id")
             done.append(row)
             if buchungstext:
                 date_str = row["date"].strftime("%d.%m.%Y") if row["date"] else "?"
@@ -2225,6 +2459,23 @@ def sync_moss_open_invoices(page) -> dict:
             print(f"  🔒 {row['merchant']} {row['amount']:.2f} € ({datum})")
 
     print(f"Moss-Abgleich: {len(done)} hochgeladen, {applied.get('applied', 0)} Buchungstext(e) aus Slack eingetragen, {len(proposals)} Vorschlag/Vorschläge geprüft, {len(already)} bereits erledigt, {len(unmatched)} ohne lokalen Beleg, {len(gesperrt)} in Moss gesperrt.")
+    _speichere_moss_stand({
+        "zeit": datetime.now().isoformat(timespec="seconds"),
+        "gesamt": _LAUF_STAND.get("gesamt"),
+        "ohne_beleg_anzahl": ohne_beleg_anzahl - len(done),
+        "pflicht_offen": _LAUF_STAND.get("pflicht_offen"),
+        "ohne_produktzeilen": _LAUF_STAND.get("ohne_produktzeilen", 0),
+        "hochgeladen": len(done),
+        "texte_eingetragen": applied.get("applied", 0),
+        "ohne_beleg": ([_stand_zeile(r, r.get("_grund") or "keine passende Rechnung im Ordner") for r in unmatched]
+                       + [_stand_zeile(r, "in Moss gesperrt – Beleg von Hand anhängen") for r in gesperrt]),
+    })
+    for r in gesperrt:
+        r["_grund"] = "in Moss gesperrt – Beleg von Hand anhängen"
+    try:
+        melde_handarbeit(unmatched + gesperrt)
+    except Exception as e:
+        print(f"Moss: Warnung zu fehlenden Belegen nicht gesendet: {e}")
     return {"sent": done, "already_sent": already, "unmatched": unmatched,
             "locked": gesperrt, "texts_filled": applied.get("applied", 0),
             "proposals": proposals}
