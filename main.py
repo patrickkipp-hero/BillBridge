@@ -879,9 +879,6 @@ def _find_galaxus_invoice_links(page, context, already_seen: set) -> list[tuple[
 
 
 def post_to_slack(files: list[Path]) -> None:
-    from slack_sdk import WebClient
-    from slack_sdk.errors import SlackApiError
-
     # Letzte Schranke vor Moss: Was hier durchgeht, ordnet die Moss-App einer
     # Transaktion zu. Deshalb an dieser einen Stelle für alle Wege prüfen.
     rechnungen = []
@@ -896,6 +893,10 @@ def post_to_slack(files: list[Path]) -> None:
     if not files:
         print("Keine Rechnungen zum Hochladen.")
         return
+
+    # Erst hier laden: Ohne Rechnungen braucht es Slack gar nicht.
+    from slack_sdk import WebClient
+    from slack_sdk.errors import SlackApiError
 
     # Moss-DM: User-Token + DM-Channel per conversations.open öffnen
     moss_channel = None
